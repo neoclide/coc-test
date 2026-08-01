@@ -2,32 +2,17 @@ import fs from 'node:fs'
 import fsPromises from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { extractZip } from './unzip.js'
 import type { CocInstallation } from './types.js'
 
-function getAuthorizationHeader(): string | undefined {
-  let token: string | undefined
-  if (process.env.GITHUB_API_TOKEN) {
-    token = process.env.GITHUB_API_TOKEN
-  } else if (process.env.GH_TOKEN) {
-    token = process.env.GH_TOKEN
-  } else if (process.env.GITHUB_TOKEN) {
-    token = process.env.GITHUB_TOKEN
-  }
-  return typeof token === 'string' ? `Bearer ${token}` : undefined
-}
-
-// const authorizationHeader = getAuthorizationHeader()
-
 function createGitHubHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {
+  return {
     Accept: 'application/vnd.github+json',
     'User-Agent': 'coc-test',
     'X-GitHub-Api-Version': '2022-11-28',
   }
-
-  return headers
 }
 
 async function isFile(filepath: string): Promise<boolean> {
@@ -99,13 +84,29 @@ export async function downloadFile(
     throw new Error('GitHub returned an empty response body')
   }
 
+  const totalBytes = parseContentLength(response.headers.get('content-length'))
+  const progress = new DownloadProgress({
+    label: 'Downloading coc.nvim',
+    totalBytes,
+  })
+  let receivedBytes = 0
+  const counter = new Transform({
+    transform(chunk, _encoding, callback) {
+      receivedBytes += chunk.length
+      progress.update(receivedBytes)
+      callback(null, chunk)
+    },
+  })
+
   try {
     await pipeline(
       response.body,
+      counter,
       fs.createWriteStream(temporaryPath, {
         flags: 'wx',
       }),
     )
+    progress.finish()
 
     await fsPromises.rm(outputPath, {
       force: true,
@@ -113,6 +114,7 @@ export async function downloadFile(
 
     await fsPromises.rename(temporaryPath, outputPath)
   } catch (error) {
+    progress.fail()
     await fsPromises.rm(temporaryPath, {
       force: true,
     })
@@ -120,10 +122,111 @@ export async function downloadFile(
   }
 }
 
+export interface DownloadProgressOptions {
+  label: string
+  totalBytes: number | undefined
+  output?: { write(value: string): unknown; isTTY?: boolean }
+}
+
+const BAR_WIDTH = 20
+const MIN_RENDER_INTERVAL_MS = 100
+
+/** Real-time single-line download progress rendered at a fixed position. */
+export class DownloadProgress {
+  private readonly label: string
+  private readonly totalBytes: number | undefined
+  private readonly output: { write(value: string): unknown; isTTY?: boolean }
+  private readonly interactive: boolean
+  private readonly startedAt = Date.now()
+  private receivedBytes = 0
+  private lastRenderAt = 0
+
+  constructor(options: DownloadProgressOptions) {
+    this.label = options.label
+    this.totalBytes = options.totalBytes
+    this.output = options.output ?? process.stdout
+    this.interactive = Boolean(this.output.isTTY === true && !process.env.CI)
+  }
+
+  update(receivedBytes: number): void {
+    this.receivedBytes = receivedBytes
+    this.render(false)
+  }
+
+  /** Render the final state and move to a new line. */
+  finish(): void {
+    if (!this.interactive) return
+    this.render(true)
+    this.output.write('\n')
+  }
+
+  /** Clear the progress line so later output starts on a clean line. */
+  fail(): void {
+    if (!this.interactive) return
+    this.output.write('\r\x1b[K')
+  }
+
+  private render(force: boolean): void {
+    if (!this.interactive) return
+    const now = Date.now()
+    if (!force && now - this.lastRenderAt < MIN_RENDER_INTERVAL_MS) return
+    this.lastRenderAt = now
+
+    const elapsedSeconds = (now - this.startedAt) / 1000
+    const speed = elapsedSeconds > 0 ? this.receivedBytes / elapsedSeconds : 0
+    const totalBytes = this.totalBytes
+    const hasTotal = totalBytes !== undefined && totalBytes > 0
+    const ratio = hasTotal ? Math.min(1, this.receivedBytes / totalBytes) : undefined
+    const remainingBytes = hasTotal ? Math.max(0, totalBytes - this.receivedBytes) : undefined
+    const etaSeconds = ratio !== undefined && speed > 0 && remainingBytes !== undefined
+      ? remainingBytes / speed
+      : undefined
+
+    const parts = [
+      ratio !== undefined ? renderProgressBar(ratio) : '',
+      ratio !== undefined ? `${Math.round(ratio * 100)}%` : '',
+      `${formatBytes(this.receivedBytes)}${hasTotal ? ` / ${formatBytes(totalBytes)}` : ''}`,
+      speed > 0 ? `${formatBytes(speed)}/s` : '',
+      etaSeconds !== undefined ? `eta ${formatDuration(etaSeconds)}` : '',
+    ].filter(Boolean)
+
+    this.output.write(`\r\x1b[K${this.label} ${parts.join('  ')}`)
+  }
+}
+
+function parseContentLength(value: string | null): number | undefined {
+  if (value === null) return undefined
+  const total = Number(value)
+  return Number.isFinite(total) && total > 0 ? total : undefined
+}
+
+function renderProgressBar(ratio: number): string {
+  const filled = Math.round(BAR_WIDTH * Math.max(0, Math.min(1, ratio)))
+  return `[${'█'.repeat(filled)}${'░'.repeat(BAR_WIDTH - filled)}]`
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${Math.round(bytes)} B`
+  const units = ['KB', 'MB', 'GB']
+  let value = bytes / 1024
+  let unit = units[0]
+  for (let index = 1; index < units.length && value >= 1024; index++) {
+    value /= 1024
+    unit = units[index]
+  }
+  return `${value >= 10 ? Math.round(value) : value.toFixed(1)} ${unit}`
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${Math.max(0, Math.round(seconds))}s`
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}m ${Math.max(0, Math.round(seconds % 60))}s`
+}
+
 export async function isValidRoot(dir: string): Promise<boolean> {
   const files = ['build/index.js', 'plugin/coc.vim', 'src/__tests__/vimrc']
-  for (let file of files) {
-    let entry = path.join(dir, file)
+  for (const file of files) {
+    const entry = path.join(dir, file)
     if (!await isFile(entry)) {
       return false
     }
@@ -188,7 +291,7 @@ export async function downloadRelease(requestedVersion?: string, forceDownload =
     versionOrHash = info.hash
     downloadUrl = info.zipUrl
   }
-  let targetDirectory = path.join(os.tmpdir(), `coc-nvim-${versionOrHash}`)
+  const targetDirectory = path.join(os.tmpdir(), `coc-nvim-${versionOrHash}`)
 
   const targetDir = path.resolve(targetDirectory)
   const zipFile = `${targetDir}.zip`

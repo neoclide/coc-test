@@ -4,8 +4,8 @@ import { resolveTestFiles } from './files.js'
 import { findProject } from './project.js'
 import { runTests } from './test-runner.js'
 import { watchTests } from './watch.js'
-import path from 'path'
-import { writeFileSync } from 'fs'
+import { writeFileSync } from 'node:fs'
+import path from 'node:path'
 import type { CliOptions } from './types.js'
 
 export async function execute(options: CliOptions): Promise<number> {

@@ -36,3 +36,28 @@ test('rejects download options with a local coc.nvim path', () => {
     /cannot be combined/,
   )
 })
+
+test('rejects an invalid test name pattern', () => {
+  assert.throws(
+    () => parseArgs(['--test-name-pattern', '([', 'test/*.test.js']),
+    /Invalid test name pattern: /,
+  )
+})
+
+test('parses long options with an equals sign', () => {
+  const versionParsed = parseArgs(['--use=v0.0.83', '--test-name-pattern=^foo$', 'test/*.test.js'])
+  assert.equal(versionParsed.options.cocVersion, 'v0.0.83')
+  assert.equal(versionParsed.options.testNamePattern, '^foo$')
+
+  const pathParsed = parseArgs(['--coc-path=/opt/coc.nvim', 'test/*.test.js'])
+  assert.equal(pathParsed.options.cocPath, '/opt/coc.nvim')
+})
+
+test('rejects a long option with a missing equals value', () => {
+  assert.throws(() => parseArgs(['--use=', 'test/*.test.js']), /Missing value for --use/)
+  assert.throws(() => parseArgs(['--coc-path=', 'test/*.test.js']), /Missing value for --coc-path/)
+})
+
+test('rejects an unknown long option with an equals sign', () => {
+  assert.throws(() => parseArgs(['--unknown=x', 'test/*.test.js']), /Unknown option: --unknown/)
+})

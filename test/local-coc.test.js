@@ -18,6 +18,8 @@ test('uses an existing coc.nvim directory without downloading', async t => {
   assert.equal(installation.root, root)
   assert.equal(installation.entryFile, path.join(root, 'build', 'index.js'))
   assert.equal(installation.vimrc, path.join(root, 'src', '__tests__', 'vimrc'))
+  // The missing test vimrc is created inside the provided directory (original behavior).
+  await fs.access(installation.vimrc)
 })
 
 test('rejects a directory without a coc.nvim build', async () => {

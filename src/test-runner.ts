@@ -29,7 +29,7 @@ export async function runTests(options: RunTestsOptions): Promise<boolean> {
 
   const reporter = new TestReporter(options.bundles.map(bundle => bundle.sourceFile), options.project.root)
   reporter.start()
-  const results = new Array<TestResult>(options.bundles.length)
+  const results = new Array<TestResult | undefined>(options.bundles.length)
   let nextIndex = 0
   const runNext = async (): Promise<void> => {
     while (!options.signal?.aborted && nextIndex < options.bundles.length) {
@@ -55,7 +55,7 @@ export async function runTests(options: RunTestsOptions): Promise<boolean> {
   }
   reporter.finish(results)
 
-  return results.every(result => result.passed)
+  return results.every(result => result?.passed ?? false)
 }
 
 function runTestChild(

@@ -70,8 +70,6 @@ async function startVim(coc: CocModule, vimrc: string, project: ProjectInfo): Pr
 
 function spawn(command: string, args: string[], cwd: string, env = process.env): cp.ChildProcess {
   const proc = cp.spawn(command, args, { cwd, env })
-  // proc.stdout?.pipe(process.stdout)
-  // proc.stderr?.pipe(process.stderr)
   proc.once('error', error => console.error(`Editor process error: ${error.message}`))
   return proc
 }

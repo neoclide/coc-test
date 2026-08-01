@@ -7,7 +7,12 @@ export function packageVersion(): string {
   while (true) {
     const filename = path.join(directory, 'package.json')
     if (fs.existsSync(filename)) {
-      const value = JSON.parse(fs.readFileSync(filename, 'utf8')) as { version?: unknown }
+      let value: { version?: unknown }
+      try {
+        value = JSON.parse(fs.readFileSync(filename, 'utf8')) as { version?: unknown }
+      } catch (error) {
+        throw new Error(`Unable to read package.json at ${filename}: ${errorMessage(error)}`, { cause: error })
+      }
       if (typeof value.version === 'string') return value.version
     }
     const parent = path.dirname(directory)
@@ -15,4 +20,8 @@ export function packageVersion(): string {
     directory = parent
   }
   throw new Error('Unable to locate coc-test package.json.')
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

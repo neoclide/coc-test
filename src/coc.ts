@@ -1,6 +1,6 @@
-import fs from 'fs'
+import fs from 'node:fs'
 import { createRequire } from 'node:module'
-import path from 'path'
+import path from 'node:path'
 import type { CliOptions, CocInstallation, CocModule } from './types.js'
 
 const require = createRequire(import.meta.url)
@@ -23,7 +23,7 @@ export function loadCocModule(installResult: CocInstallation, editor: CliOptions
     if (typeof loaded.loadExtension !== 'function') throw new Error('Missing loadExtension export.')
     return Object.assign({}, loaded) as CocModule
   } catch (error) {
-    throw new Error(`Failed to require coc.nvim entry ${installResult}: ${errorMessage(error)}`, { cause: error })
+    throw new Error(`Failed to require coc.nvim entry ${installResult.entryFile}: ${errorMessage(error)}`, { cause: error })
   }
 }
 

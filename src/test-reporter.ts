@@ -72,11 +72,12 @@ export class TestReporter {
     }
   }
 
-  finish(results: TestResult[]): void {
+  finish(results: Array<TestResult | undefined>): void {
     if (this.timer) clearInterval(this.timer)
     if (this.interactive) this.render()
 
-    const failures = results.filter(result => !result.passed)
+    const completed = results.filter((result): result is TestResult => result !== undefined)
+    const failures = completed.filter(result => !result.passed)
     if (failures.length > 0) {
       const failedTests = failures.reduce((count, result) => count + result.stats.failed, 0)
       const failureCount = failedTests || failures.length
@@ -89,8 +90,8 @@ export class TestReporter {
       }
     }
 
-    const passedFiles = results.length - failures.length
-    const stats = results.reduce((total, result) => addStats(total, result.stats), emptyStats())
+    const passedFiles = completed.length - failures.length
+    const stats = completed.reduce((total, result) => addStats(total, result.stats), emptyStats())
     const fileParts = [
       failures.length ? this.red(`${failures.length} failed`) : '',
       passedFiles ? this.green(`${passedFiles} passed`) : '',
@@ -102,7 +103,7 @@ export class TestReporter {
       stats.todo ? this.yellow(`${stats.todo} todo`) : '',
     ].filter(Boolean).join(this.dim(' | ')) || this.dim('0 tests')
 
-    process.stdout.write(`\n${this.bold('Test Files')}  ${fileParts} ${this.dim(`(${results.length})`)}\n`)
+    process.stdout.write(`\n${this.bold('Test Files')}  ${fileParts} ${this.dim(`(${completed.length})`)}\n`)
     process.stdout.write(`${this.bold('Tests')}       ${testParts} ${this.dim(`(${stats.tests})`)}\n`)
     process.stdout.write(`${this.bold('Duration')}    ${formatDuration(Date.now() - this.startedAt)}\n`)
   }

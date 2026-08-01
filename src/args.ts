@@ -40,6 +40,25 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index]
+    const equalsIndex = arg.startsWith('--') ? arg.indexOf('=') : -1
+    if (equalsIndex !== -1) {
+      const name = arg.slice(0, equalsIndex)
+      const value = arg.slice(equalsIndex + 1)
+      if (!value) throw new Error(`Missing value for ${name}`)
+      if (name === '--use') {
+        cocVersion = value
+        continue
+      }
+      if (name === '--coc-path') {
+        cocPath = value
+        continue
+      }
+      if (name === '--test-name-pattern') {
+        testNamePattern = value
+        continue
+      }
+      throw new Error(`Unknown option: ${name}`)
+    }
     if (arg === '-h' || arg === '--help') return { action: 'help' }
     if (arg === '-v' || arg === '--version') return { action: 'version' }
     if (arg === '--init') {
@@ -85,6 +104,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (files.length === 0) throw new Error('At least one test file or glob pattern is required.')
   if (cocPath && (cocVersion || forceDownload)) {
     throw new Error('--coc-path cannot be combined with --use or --download.')
+  }
+  if (testNamePattern) {
+    try {
+      new RegExp(testNamePattern)
+    } catch {
+      throw new Error(`Invalid test name pattern: ${testNamePattern}`)
+    }
   }
   return {
     action: 'run',

@@ -20,14 +20,6 @@ async function main(): Promise<void> {
       return
     }
     const options = parsed.options!
-    if (options.testNamePattern) {
-      try {
-        new RegExp(options.testNamePattern)
-      } catch (e) {
-        console.error(`Invalid test name pattern: ${options.testNamePattern}`)
-        return
-      }
-    }
     const exitCode = await execute(options)
     process.exitCode = exitCode
     if (options.forceExit) process.exit(exitCode)
