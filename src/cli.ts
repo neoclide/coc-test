@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import { helpText, parseArgs } from './args.js'
+import { forceExitProcess } from './exit.js'
 import { execute } from './main.js'
 import { initialize } from './init.js'
 import { packageVersion } from './version.js'
 
 async function main(): Promise<void> {
+  let forceExit = false
   try {
     const parsed = parseArgs(process.argv.slice(2))
     if (parsed.action === 'help') {
@@ -20,12 +22,14 @@ async function main(): Promise<void> {
       return
     }
     const options = parsed.options!
+    forceExit = options.forceExit
     const exitCode = await execute(options)
     process.exitCode = exitCode
-    if (options.forceExit) process.exit(exitCode)
+    if (forceExit) await forceExitProcess(exitCode)
   } catch (error) {
     console.error(formatError(error))
     process.exitCode = 1
+    if (forceExit) await forceExitProcess(1)
   }
 }
 

@@ -61,3 +61,8 @@ test('rejects a long option with a missing equals value', () => {
 test('rejects an unknown long option with an equals sign', () => {
   assert.throws(() => parseArgs(['--unknown=x', 'test/*.test.js']), /Unknown option: --unknown/)
 })
+
+test('parses the force exit flag', () => {
+  assert.equal(parseArgs(['--force-exit', 'test/*.test.js']).options.forceExit, true)
+  assert.equal(parseArgs(['test/*.test.js']).options.forceExit, false)
+})
