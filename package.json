@@ -8,8 +8,7 @@
   },
   "files": [
     "bin/coc-test",
-    "lib/**/*.js",
-    "lib/**/*.d.ts"
+    "lib/**/*.js"
   ],
   "scripts": {
     "clean": "rimraf lib",
