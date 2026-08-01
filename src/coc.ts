@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import type { CliOptions, CocInstallation, CocModule } from './types.js'
@@ -13,8 +14,9 @@ export function loadCocModule(installResult: CocInstallation, editor: CliOptions
   process.env.COC_NVIM = '1'
   process.env.VIMRUNTIME = ''
   process.env.COC_VIMCONFIG = path.dirname(installResult.vimrc)
-  const dataHome = cocDataHome(installResult)
+  const dataHome = cocDataHome()
   process.env.COC_DATA_HOME = dataHome
+  process.env.XDG_RUNTIME_DIR = dataHome
   fs.rmSync(dataHome, { recursive: true, force: true })
   fs.mkdirSync(dataHome, { recursive: true })
   try {
@@ -27,12 +29,13 @@ export function loadCocModule(installResult: CocInstallation, editor: CliOptions
   }
 }
 
-export function removeCocDataHome(installResult: CocInstallation): void {
-  fs.rmSync(cocDataHome(installResult), { recursive: true, force: true })
+export function removeCocDataHome(): void {
+  let dir = path.join(os.tmpdir(), `coc-test-${process.pid}`)
+  fs.rmSync(dir, { recursive: true, force: true })
 }
 
-function cocDataHome(installResult: CocInstallation): string {
-  return path.join(installResult.root, `test-data-${process.pid}`)
+function cocDataHome(): string {
+  return path.join(os.tmpdir(), `test-data-${process.pid}`)
 }
 
 function errorMessage(error: unknown): string {

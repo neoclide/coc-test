@@ -94,7 +94,7 @@ async function main(data: TestChildData, signal: AbortSignal): Promise<TestResul
       restoreGlobals?.()
       await closeSession()
     } finally {
-      removeCocDataHome(data.installation)
+      removeCocDataHome()
     }
   }
 }
