@@ -4,7 +4,7 @@
   "description": "Integration test runner for coc.nvim extensions",
   "type": "module",
   "bin": {
-    "coc-test": "./bin/coc-test"
+    "coc-test": "bin/coc-test"
   },
   "files": [
     "bin/coc-test",
