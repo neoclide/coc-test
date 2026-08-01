@@ -17,6 +17,8 @@ Options:
   -w, --watch                     Watch files and rerun affected tests
   --force-exit                    Force process exit after tests finish
   -h, --help                      Show this help
+
+Long options also accept --option=value syntax.
 `
 
 export interface ParsedArgs {

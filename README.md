@@ -121,10 +121,15 @@ If a change occurs while tests are running, the affected run is cancelled
 first. Its Node.js child process, editor, and coc.nvim environment are fully
 released before the replacement run starts.
 
+## Downloading coc.nvim
+
+By default, `coc-test` downloads the latest coc.nvim release and caches it by
+version, so repeated runs reuse the extracted checkout. 
+
 ## Using a local coc.nvim build
 
-By default, `coc-test` downloads latest coc.nvim release. During coc.nvim or
-runner development, use an existing build to avoid downloading:
+During coc.nvim or runner development, use an existing build to avoid
+downloading:
 
 ```sh
 npx coc-test --coc-path /path/to/coc.nvim 'test/**/*.test.ts'
@@ -142,12 +147,15 @@ COC_TEST_COC_PATH=/path/to/coc.nvim npm test
 --nvim                         Run tests on Neovim (default)
 --vim                          Run tests on Vim
 -w, --watch                    Watch files and rerun affected tests
---test-name-pattern <pattern>  Run tests whose names match a regular expression
+--test-name-pattern <pattern>  Run tests matching a regular expression (must be valid)
 --coc-path <directory>         Use an existing coc.nvim build
 -u, --use <version>            Use a specific coc.nvim release tag
 -d, --download                 Force a fresh coc.nvim download
 --force-exit                   Force the main process to exit after the run
 ```
+
+Long options also accept `--option=value`, for example
+`--test-name-pattern=^foo$` or `--coc-path=/path/to/coc.nvim`.
 
 Run `npx coc-test --help` for the complete command reference.
 
