@@ -1,4 +1,10 @@
+<p align="center">
+  <img src="./logo.svg" width="120" alt="coc-test logo">
+</p>
+
 # coc-test
+
+[![CI](https://github.com/neoclide/coc-test/actions/workflows/ci.yml/badge.svg)](https://github.com/neoclide/coc-test/actions/workflows/ci.yml)
 
 `coc-test` is an integration test runner for coc.nvim extensions. It bundles
 JavaScript and TypeScript tests, starts Vim or Neovim with coc.nvim and the

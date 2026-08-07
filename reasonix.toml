@@ -1,0 +1,2 @@
+[permissions]
+allow = ["Bash=git remote -v && git branch --show-current && git log --oneline -3", "Edit", "Bash=cd /Users/chemzqm/nodejs-dev/coc-test && npm run check && npm test 2>&1 | tail -20", "Bash=cd /Users/chemzqm/nodejs-dev/coc-test && python3 -c \"import xml.etree.ElementTree as ET; ET.parse('logo.svg'); print('SVG OK')\""]
