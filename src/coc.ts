@@ -6,14 +6,27 @@ import type { CliOptions, CocInstallation, CocModule } from './types.js'
 
 const require = createRequire(import.meta.url)
 
-export function loadCocModule(installResult: CocInstallation, editor: CliOptions['editor']): CocModule {
+export function loadCocModule(
+  installResult: CocInstallation,
+  editor: CliOptions['editor'],
+  userConfig?: Record<string, unknown>,
+): CocModule {
   if (editor === 'vim') {
     process.env.VIM_NODE_RPC = '1'
   }
   process.env.COC_TESTER = '1'
   process.env.COC_NVIM = '1'
   process.env.VIMRUNTIME = ''
-  process.env.COC_VIMCONFIG = path.dirname(installResult.vimrc)
+  const configHome = cocConfigHome()
+  process.env.COC_VIMCONFIG = configHome
+  fs.mkdirSync(configHome, { recursive: true })
+  if (userConfig) {
+    fs.writeFileSync(
+      path.join(configHome, 'coc-settings.json'),
+      JSON.stringify(userConfig, null, 2) + '\n',
+      'utf8',
+    )
+  }
   const dataHome = cocDataHome()
   process.env.COC_DATA_HOME = dataHome
   process.env.XDG_RUNTIME_DIR = dataHome
@@ -29,13 +42,17 @@ export function loadCocModule(installResult: CocInstallation, editor: CliOptions
   }
 }
 
-export function removeCocDataHome(): void {
-  let dir = path.join(os.tmpdir(), `coc-test-${process.pid}`)
-  fs.rmSync(dir, { recursive: true, force: true })
+export function removeCocTestDirs(): void {
+  fs.rmSync(cocDataHome(), { recursive: true, force: true })
+  fs.rmSync(cocConfigHome(), { recursive: true, force: true })
 }
 
 function cocDataHome(): string {
   return path.join(os.tmpdir(), `test-data-${process.pid}`)
+}
+
+function cocConfigHome(): string {
+  return path.join(os.tmpdir(), `coc-test-config-${process.pid}`)
 }
 
 function errorMessage(error: unknown): string {

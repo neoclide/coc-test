@@ -6,7 +6,7 @@ import { run } from 'node:test'
 import { spec } from 'node:test/reporters'
 import { pathToFileURL } from 'node:url'
 import type { TestBundle } from './bundle.js'
-import { loadCocModule, removeCocDataHome } from './coc.js'
+import { loadCocModule, removeCocTestDirs } from './coc.js'
 import { startEditor } from './editor.js'
 import { installRuntimeGlobals } from './runtime-globals.js'
 import type {
@@ -50,7 +50,7 @@ async function main(data: TestChildData, signal: AbortSignal): Promise<TestResul
   signal.addEventListener('abort', onAbort, { once: true })
   try {
     sendProgress(data.bundle.sourceFile, 'starting', emptyStats())
-    const coc = loadCocModule(data.installation, data.editor)
+    const coc = loadCocModule(data.installation, data.editor, data.project.config['user-settings'])
     session = await startEditor(data.editor, coc, data.installation.vimrc, data.project)
     if (signal.aborted) throw abortError()
     const extension = await coc.loadExtension(data.project.root, true)
@@ -94,7 +94,7 @@ async function main(data: TestChildData, signal: AbortSignal): Promise<TestResul
       restoreGlobals?.()
       await closeSession()
     } finally {
-      removeCocDataHome()
+      removeCocTestDirs()
     }
   }
 }
