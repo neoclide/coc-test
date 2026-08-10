@@ -11,9 +11,8 @@
     "lib/**/*.js"
   ],
   "scripts": {
-    "clean": "rimraf lib",
-    "build": "npm run clean && tsc -p tsconfig.json",
-    "check": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test test/*.test.js",
     "test:nvim": "npm run build && node test/run.js --nvim",
     "test:vim": "npm run build && node test/run.js --vim"
@@ -23,13 +22,12 @@
   },
   "packageManager": "bun@1.3.14",
   "dependencies": {
+    "esbuild": "^0.28.2",
     "fast-glob": "^3.3.3",
-    "fflate": "^0.8.3",
-    "rolldown": "^1.0.0-beta.36"
+    "fflate": "^0.8.3"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
-    "rimraf": "^6.1.3",
     "typescript": "^6.0.0"
   }
 }

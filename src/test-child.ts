@@ -9,6 +9,7 @@ import type { TestBundle } from './bundle.js'
 import { loadCocModule, removeCocTestDirs } from './coc.js'
 import { startEditor } from './editor.js'
 import { installRuntimeGlobals } from './runtime-globals.js'
+import { injectTeardownHook, TEARDOWN_KEY } from './test-code.js'
 import type {
   TestChildCommand,
   TestChildData,
@@ -16,10 +17,6 @@ import type {
   TestResult,
   TestStats,
 } from './test-protocol.js'
-
-const TEARDOWN_KEY = '__coc_test_child_teardown__'
-// Keep the injected hook on one line so existing bundle/source-map line offsets stay intact.
-const TEARDOWN_HOOK = `;(()=>{const{after}=require('node:test');after(async()=>{const teardown=globalThis[${JSON.stringify(TEARDOWN_KEY)}];if(typeof teardown!=='function')throw new Error('coc-test child teardown callback is unavailable');await teardown()})})()`
 
 type RuntimeGlobal = typeof globalThis & {
   [TEARDOWN_KEY]?: () => void | Promise<void>
@@ -250,12 +247,6 @@ function normalizeSpecifier(specifier: string): string | undefined {
   if (specifier.startsWith('file:')) return specifier
   if (!path.isAbsolute(specifier)) return undefined
   return pathToFileURL(specifier).href
-}
-
-function injectTeardownHook(source: string): string {
-  // Register before evaluating the bundle so top-level/import failures still
-  // release the editor and allow the test event stream to finish.
-  return `${TEARDOWN_HOOK}${source}`
 }
 
 const command = await receiveCommand()

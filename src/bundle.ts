@@ -1,6 +1,13 @@
 import { builtinModules } from 'node:module'
 import path from 'node:path'
-import { rolldown, type Plugin } from 'rolldown'
+import {
+  build as esbuild,
+  type OnResolveArgs,
+  type OnResolveResult,
+  type Plugin,
+  type PluginBuild,
+  type ResolveResult,
+} from 'esbuild'
 
 export interface BundleOptions {
   projectRoot: string
@@ -15,8 +22,9 @@ export interface TestBundle {
   watchFiles: string[]
 }
 
-const VIRTUAL_COC = '\0coc-test:runtime-coc-exports'
-const VIRTUAL_EXTENSION = '\0coc-test:runtime-extension-exports'
+const RUNTIME_NAMESPACE = 'coc-test-runtime'
+const VIRTUAL_COC = 'coc-exports'
+const VIRTUAL_EXTENSION = 'extension-exports'
 
 export async function bundleTests(
   files: string[],
@@ -36,74 +44,87 @@ async function bundleOne(
   index: number,
   options: BundleOptions,
 ): Promise<TestBundle> {
-  const bundle = await rolldown({
-    input: file,
-    platform: 'node',
-    plugins: [runtimeModulePlugin(options)],
-    treeshake: false,
-  })
+  const virtualFile = virtualFilename(file, index, options.projectRoot)
 
   try {
-    const result = await bundle.generate({
+    const result = await esbuild({
+      entryPoints: [file],
+      absWorkingDir: options.projectRoot,
+      absPaths: ['metafile'],
+      bundle: true,
       format: 'cjs',
+      logLevel: 'silent',
+      metafile: true,
+      outfile: virtualFile,
+      platform: 'node',
+      plugins: [runtimeModulePlugin(options)],
+      preserveSymlinks: true,
       sourcemap: 'inline',
-      exports: 'auto',
+      treeShaking: false,
+      write: false,
     })
-    const chunks = result.output.filter(item => item.type === 'chunk')
-    if (chunks.length !== 1) {
+    if (result.outputFiles.length !== 1) {
       throw new Error(
-        `Expected one output chunk for ${file}, received ${chunks.length}.`,
+        `Expected one output file for ${file}, received ${result.outputFiles.length}.`,
       )
     }
 
-    const watchFiles = await bundle.watchFiles
     return {
       sourceFile: file,
-      virtualFile: virtualFilename(file, index, options.projectRoot),
-      code: normalizeInlineSourceMap(chunks[0].code, file),
-      watchFiles: watchFiles.map(normalizeFilesystemPath),
+      virtualFile,
+      code: normalizeInlineSourceMap(result.outputFiles[0].text, virtualFile),
+      watchFiles: watchFilesFromMetafile(result.metafile),
     }
   } catch (error) {
     throw new Error(
       `Failed to bundle test ${file}: ${errorMessage(error)}`,
       { cause: error },
     )
-  } finally {
-    await bundle.close()
   }
 }
 
 /** Resolve the extension's local dependency graph without writing an output file. */
 export async function collectExtensionWatchFiles(options: BundleOptions): Promise<string[]> {
-  const bundle = await rolldown({
-    input: options.projectMain,
+  const result = await esbuild({
+    entryPoints: [options.projectMain],
+    absWorkingDir: options.projectRoot,
+    absPaths: ['metafile'],
+    bundle: true,
+    format: 'cjs',
+    logLevel: 'silent',
+    metafile: true,
     platform: 'node',
     plugins: [extensionGraphPlugin(options.projectRoot)],
-    treeshake: false,
+    preserveSymlinks: true,
+    treeShaking: false,
+    write: false,
   })
-  try {
-    await bundle.generate({ format: 'cjs' })
-    return (await bundle.watchFiles).map(normalizeFilesystemPath)
-  } finally {
-    await bundle.close()
-  }
+  return watchFilesFromMetafile(result.metafile)
 }
 
 function extensionGraphPlugin(projectRoot: string): Plugin {
   const root = normalize(projectRoot)
-  const builtins = new Set([...builtinModules, ...builtinModules.map(name => `node:${name}`)])
+  const builtins = builtinModuleSet()
   return {
     name: 'coc-test-extension-watch-files',
-    async resolveId(source, importer) {
-      if (source === 'coc.nvim' || builtins.has(source)) return { id: source, external: true }
-      if (!importer) return null
-      const resolved = await this.resolve(source, importer, { skipSelf: true })
-      if (!resolved || resolved.external || resolved.id.startsWith('\0')) return resolved
-      const id = normalize(stripQuery(resolved.id))
-      if (!isInside(id, root) || id.includes('/node_modules/')) {
-        return { id: resolved.id, external: true }
-      }
-      return resolved
+    setup(build) {
+      const skipSelf = {}
+      build.onResolve({ filter: /.*/, namespace: 'file' }, async args => {
+        if (args.kind === 'entry-point' || args.pluginData === skipSelf) return
+        if (args.path === 'coc.nvim' || builtins.has(args.path)) {
+          return { path: args.path, external: true }
+        }
+
+        const resolved = await resolveImport(build, args, skipSelf)
+        if (!resolved) return unresolvedExternal(args)
+        if (resolved.external || resolved.namespace !== 'file') return forwardResolution(resolved)
+
+        const id = normalize(stripQuery(resolved.path))
+        if (!isInside(id, root) || id.includes('/node_modules/')) {
+          return externalResolution(resolved)
+        }
+        return forwardResolution(resolved)
+      })
     },
   }
 }
@@ -150,58 +171,93 @@ function runtimeModulePlugin(options: BundleOptions): Plugin {
   const projectRoot = normalize(options.projectRoot)
   const projectMain = normalize(options.projectMain)
   const cocEntry = normalize(options.cocEntry)
-  const builtins = new Set([
-    ...builtinModules,
-    ...builtinModules.map(name => `node:${name}`),
-  ])
+  const builtins = builtinModuleSet()
 
   return {
     name: 'coc-test-runtime-modules',
-
-    async resolveId(source, importer) {
-      if (source === VIRTUAL_COC || source === VIRTUAL_EXTENSION) return source
-      if (source === 'coc.nvim') return VIRTUAL_COC
-      if (builtins.has(source)) return { id: source, external: true }
-      if (!importer || importer.startsWith('\0')) return null
-
-      const resolved = await this.resolve(source, importer, { skipSelf: true })
-
-      if (!resolved) return { id: source, external: true }
-      if (resolved.external) return resolved
-      if (resolved.id.startsWith('\0')) return resolved
-
-      const resolvedId = normalize(stripQuery(resolved.id))
-      if (resolvedId === projectMain) return VIRTUAL_EXTENSION
-      if (resolvedId === cocEntry) return VIRTUAL_COC
-      if (isInside(resolvedId, projectRoot)) return resolved
-
-      return { id: resolved.id, external: true }
-    },
-
-    load(id) {
-      if (id === VIRTUAL_COC) {
-        return {
-          code: runtimeCommonJsModule(
-            '__coc_test_coc_exports__',
-            'coc.nvim',
-          ),
-          moduleType: 'js',
+    setup(build) {
+      const skipSelf = {}
+      build.onResolve({ filter: /.*/, namespace: 'file' }, async args => {
+        if (args.kind === 'entry-point' || args.pluginData === skipSelf) return
+        if (args.path === 'coc.nvim') {
+          return { path: VIRTUAL_COC, namespace: RUNTIME_NAMESPACE }
         }
-      }
+        if (builtins.has(args.path)) return { path: args.path, external: true }
 
-      if (id === VIRTUAL_EXTENSION) {
-        return {
-          code: runtimeCommonJsModule(
-            '__coc_test_extension_exports__',
-            'extension exports',
-          ),
-          moduleType: 'js',
+        const resolved = await resolveImport(build, args, skipSelf)
+        if (!resolved) return unresolvedExternal(args)
+        if (resolved.external || resolved.namespace !== 'file') return forwardResolution(resolved)
+
+        const resolvedId = normalize(stripQuery(resolved.path))
+        if (resolvedId === projectMain) {
+          return { path: VIRTUAL_EXTENSION, namespace: RUNTIME_NAMESPACE }
         }
-      }
+        if (resolvedId === cocEntry) {
+          return { path: VIRTUAL_COC, namespace: RUNTIME_NAMESPACE }
+        }
+        if (isInside(resolvedId, projectRoot)) return forwardResolution(resolved)
 
-      return null
+        return externalResolution(resolved)
+      })
+
+      build.onLoad({ filter: /.*/, namespace: RUNTIME_NAMESPACE }, args => ({
+        contents: args.path === VIRTUAL_COC
+          ? runtimeCommonJsModule('__coc_test_coc_exports__', 'coc.nvim')
+          : runtimeCommonJsModule('__coc_test_extension_exports__', 'extension exports'),
+        loader: 'js',
+      }))
     },
   }
+}
+
+async function resolveImport(
+  build: PluginBuild,
+  args: OnResolveArgs,
+  skipSelf: object,
+): Promise<ResolveResult | undefined> {
+  const resolved = await build.resolve(args.path, {
+    importer: args.importer,
+    namespace: args.namespace,
+    resolveDir: args.resolveDir,
+    kind: args.kind,
+    pluginData: skipSelf,
+    with: args.with,
+  })
+  return resolved.errors.length === 0 ? resolved : undefined
+}
+
+function forwardResolution(resolved: ResolveResult): OnResolveResult {
+  return {
+    path: resolved.path,
+    namespace: resolved.namespace,
+    suffix: resolved.suffix,
+    external: resolved.external,
+    sideEffects: resolved.sideEffects,
+    warnings: resolved.warnings,
+  }
+}
+
+function externalResolution(resolved: ResolveResult): OnResolveResult {
+  return {
+    path: resolved.path,
+    suffix: resolved.suffix,
+    external: true,
+    warnings: resolved.warnings,
+  }
+}
+
+function unresolvedExternal(args: OnResolveArgs): OnResolveResult {
+  return { path: args.path, external: true }
+}
+
+function builtinModuleSet(): Set<string> {
+  return new Set([...builtinModules, ...builtinModules.map(name => `node:${name}`)])
+}
+
+function watchFilesFromMetafile(metafile: { inputs: Record<string, unknown> }): string[] {
+  return Object.keys(metafile.inputs)
+    .filter(filename => path.isAbsolute(filename))
+    .map(normalizeFilesystemPath)
 }
 
 function runtimeCommonJsModule(globalKey: string, label: string): string {
