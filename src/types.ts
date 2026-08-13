@@ -14,6 +14,7 @@ export interface CliOptions {
 
 export interface CocTestConfig {
   'user-settings'?: Record<string, unknown>
+  entryFile?: string
 }
 
 export interface ProjectInfo {
@@ -26,6 +27,12 @@ export interface ProjectInfo {
   }
   mainFile: string
   config: CocTestConfig
+  /** Absolute path of the configured `coc-test.entryFile`, when set. */
+  entryFile?: string
+  /** Bundled extension code produced by the parent process, shared by test children. */
+  extensionCode?: string
+  /** Directory passed to `coc.loadExtension`; points at the bundled entry when `entryFile` is set. */
+  extensionRoot: string
 }
 
 export interface CocModule {

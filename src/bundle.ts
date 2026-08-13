@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import { builtinModules } from 'node:module'
 import path from 'node:path'
 import {
@@ -8,11 +9,22 @@ import {
   type PluginBuild,
   type ResolveResult,
 } from 'esbuild'
+import {
+  extensionBundlePath,
+  EXTENSION_BUNDLE_SPECIFIER_PREFIX,
+  MODULE_REGISTRY_KEY,
+  MODULE_SPECIFIER_PREFIX,
+} from './project-modules.js'
+import type { ProjectInfo } from './types.js'
 
 export interface BundleOptions {
   projectRoot: string
   projectMain: string
   cocEntry: string
+  /** Configured `coc-test.entryFile`; when set the extension is loaded from its bundled output. */
+  entryFile?: string
+  /** Directory containing `entryFile`; project modules under it are exposed to test imports. */
+  entryRoot?: string
 }
 
 export interface TestBundle {
@@ -20,6 +32,22 @@ export interface TestBundle {
   virtualFile: string
   code: string
   watchFiles: string[]
+}
+
+export interface ExtensionModuleBuild {
+  extensionRoot: string
+  entryFile: string
+  entryRoot: string
+  /** Bundled extension code, shared by every concurrent test child. */
+  code: string
+  mainFile: string
+  watchFiles: string[]
+}
+
+export interface BuildExtensionModulesOptions {
+  projectRoot: string
+  entryFile: string
+  packageJson: ProjectInfo['packageJson']
 }
 
 const RUNTIME_NAMESPACE = 'coc-test-runtime'
@@ -86,21 +114,86 @@ async function bundleOne(
 
 /** Resolve the extension's local dependency graph without writing an output file. */
 export async function collectExtensionWatchFiles(options: BundleOptions): Promise<string[]> {
+  return collectInternalModules(options.projectRoot, options.projectMain)
+}
+
+async function collectInternalModules(projectRoot: string, entryFile: string): Promise<string[]> {
   const result = await esbuild({
-    entryPoints: [options.projectMain],
-    absWorkingDir: options.projectRoot,
+    entryPoints: [entryFile],
+    absWorkingDir: projectRoot,
     absPaths: ['metafile'],
     bundle: true,
     format: 'cjs',
     logLevel: 'silent',
     metafile: true,
     platform: 'node',
-    plugins: [extensionGraphPlugin(options.projectRoot)],
+    plugins: [extensionGraphPlugin(projectRoot)],
     preserveSymlinks: true,
     treeShaking: false,
     write: false,
   })
   return watchFilesFromMetafile(result.metafile)
+}
+
+/**
+ * Bundle the extension for testing.
+ *
+ * The directory containing `entryFile` is treated as the extension root. Every
+ * `ts`, `js`, `mjs` and `cjs` file below it is scanned and a manifest module is
+ * generated that imports each one and registers its exports in the shared
+ * `__coc_test_modules__` registry. The manifest is concatenated with the
+ * `entryFile` source and bundled by esbuild into a single CommonJS file, so
+ * the extension and the registry reference the same module instances. External
+ * dependencies stay un-bundled and are required from the extension's own
+ * installation at runtime.
+ */
+export async function buildExtensionModules(options: BuildExtensionModulesOptions): Promise<ExtensionModuleBuild> {
+  const projectRoot = normalize(options.projectRoot)
+  const entryFile = normalize(options.entryFile)
+  const entryRoot = path.dirname(entryFile)
+  const extensionRoot = path.join(projectRoot, '.coc-test-virtual', 'extension')
+  const scannedFiles = scanModuleFiles(entryRoot)
+  if (!scannedFiles.includes(entryFile)) {
+    throw new Error(`coc-test entryFile is not a module file: ${options.entryFile}`)
+  }
+
+  fs.rmSync(extensionRoot, { recursive: true, force: true })
+  fs.mkdirSync(extensionRoot, { recursive: true })
+
+  const entrySource = fs.readFileSync(path.resolve(entryFile), 'utf8')
+  const source = `${entrySource}\n${generateModuleManifest(entryFile, scannedFiles)}`
+  const mainFile = path.join(extensionRoot, 'index.js')
+  const build = await esbuild({
+    entryPoints: [entryFile],
+    absWorkingDir: path.resolve(projectRoot),
+    bundle: true,
+    format: 'cjs',
+    logLevel: 'silent',
+    platform: 'node',
+    preserveSymlinks: true,
+    treeShaking: false,
+    write: false,
+    plugins: [extensionEntryPlugin(entryFile, source), extensionBundlePlugin()],
+  })
+  if (build.errors.length > 0) {
+    throw new Error(`Failed to build extension modules: ${build.errors.map(error => error.text).join('\n')}`)
+  }
+  if (build.outputFiles.length !== 1) {
+    throw new Error(`Expected one extension bundle, received ${build.outputFiles.length}.`)
+  }
+  const code = build.outputFiles[0].text
+
+  await writeExtensionPackageJson(extensionRoot, mainFile, options.packageJson)
+  await writeExtensionStub(mainFile, extensionBundlePath(extensionRoot))
+
+  return {
+    extensionRoot,
+    entryFile,
+    entryRoot,
+    code,
+    mainFile,
+    watchFiles: [...scannedFiles].sort(),
+  }
 }
 
 function extensionGraphPlugin(projectRoot: string): Plugin {
@@ -128,6 +221,166 @@ function extensionGraphPlugin(projectRoot: string): Plugin {
       })
     },
   }
+}
+
+/**
+ * Serve the concatenated entry source (entry file plus generated module
+ * manifest) for the configured entry file, keeping the entry's directory as
+ * the base for its relative imports.
+ */
+function extensionEntryPlugin(entryFile: string, source: string): Plugin {
+  const loader = loaderForFile(entryFile)
+  const resolveDir = path.dirname(path.resolve(entryFile))
+  const pathVariants = new Set<string>([normalize(entryFile)])
+  try {
+    pathVariants.add(normalize(fs.realpathSync(entryFile)))
+  } catch {
+    // Keep the resolved path when realpath fails.
+  }
+  const filter = new RegExp(`^(${[...pathVariants].map(escapeRegExp).join('|')})$`)
+  return {
+    name: 'coc-test-extension-entry',
+    setup(build) {
+      build.onLoad({ filter, namespace: 'file' }, () => ({
+        contents: source,
+        loader,
+        resolveDir,
+      }))
+    },
+  }
+}
+
+/**
+ * Bundle every local module together while keeping `node_modules` dependencies
+ * external with their original specifiers. `coc.nvim` is mapped to the shared
+ * `__coc_test_coc_exports__` global, so the bundle does not depend on the
+ * extension sandbox's require interception.
+ */
+function extensionBundlePlugin(): Plugin {
+  const builtins = builtinModuleSet()
+  return {
+    name: 'coc-test-extension-bundle',
+    setup(build) {
+      const skipSelf = {}
+      build.onResolve({ filter: /.*/, namespace: 'file' }, async args => {
+        if (args.kind === 'entry-point' || args.pluginData === skipSelf) return
+        if (args.path === 'coc.nvim') {
+          return { path: VIRTUAL_COC, namespace: RUNTIME_NAMESPACE }
+        }
+        if (builtins.has(args.path)) {
+          return { path: args.path, external: true }
+        }
+
+        const resolved = await resolveImport(build, args, skipSelf)
+        if (!resolved) return { path: args.path, external: true }
+        if (resolved.external || resolved.namespace !== 'file') return forwardResolution(resolved)
+
+        const resolvedId = normalize(stripQuery(resolved.path))
+        if (resolvedId.includes('/node_modules/')) return { path: args.path, external: true }
+        return forwardResolution(resolved)
+      })
+
+      build.onLoad({ filter: /.*/, namespace: RUNTIME_NAMESPACE }, args => ({
+        contents: runtimeCommonJsModule('__coc_test_coc_exports__', 'coc.nvim'),
+        loader: 'js',
+      }))
+    },
+  }
+}
+
+function scanModuleFiles(root: string): string[] {
+  const files: string[] = []
+  const walk = (directory: string): void => {
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(directory, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === '.coc-test-virtual') continue
+      const full = path.join(directory, entry.name)
+      if (entry.isDirectory()) {
+        walk(full)
+      } else if (entry.isFile() && isModuleSource(full)) {
+        files.push(normalize(full))
+      }
+    }
+  }
+  walk(root)
+  return files
+}
+
+/**
+ * Generate ESM code that imports every scanned module (except the entry, which
+ * is the bundle's own module) and registers its exports in the shared registry.
+ */
+function generateModuleManifest(entryFile: string, scannedFiles: string[]): string {
+  const lines: string[] = []
+  let index = 0
+  for (const file of scannedFiles) {
+    if (file === entryFile) continue
+    lines.push(`import * as __coc_test_module_${index} from ${JSON.stringify(file)}`)
+    lines.push(`globalThis[${JSON.stringify(MODULE_REGISTRY_KEY)}][${JSON.stringify(file)}] = __coc_test_module_${index}`)
+    index++
+  }
+  if (lines.length === 0) return ''
+  return `\n// Generated by coc-test: expose extension modules to test imports\n${lines.join('\n')}\n`
+}
+
+function isModuleSource(file: string): boolean {
+  return /\.(?:[cm]?[jt]s)$/.test(file)
+}
+
+function loaderForFile(file: string): 'ts' | 'tsx' | 'js' {
+  if (/\.tsx$/.test(file)) return 'tsx'
+  if (/\.(?:ts|mts|cts)$/.test(file)) return 'ts'
+  return 'js'
+}
+
+function toPosix(value: string): string {
+  return value.replaceAll(path.sep, '/')
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+async function writeExtensionPackageJson(
+  extensionRoot: string,
+  mainFile: string,
+  packageJson: ProjectInfo['packageJson'],
+): Promise<void> {
+  const engines = isRecord(packageJson.engines) ? packageJson.engines : {}
+  const name = typeof packageJson.name === 'string' && packageJson.name ? packageJson.name : 'coc-test-extension'
+  const content = {
+    name,
+    main: toPosix(path.relative(extensionRoot, mainFile)),
+    engines: {
+      coc: typeof engines.coc === 'string' ? engines.coc : '>=0.0.1',
+    },
+    activationEvents: Array.isArray(packageJson.activationEvents)
+      ? packageJson.activationEvents
+      : ['*'],
+  }
+  await fs.promises.writeFile(
+    path.join(extensionRoot, 'package.json'),
+    `${JSON.stringify(content, null, 2)}\n`,
+    'utf8',
+  )
+}
+
+/** One-line loader that reaches the in-memory bundle through the module hooks. */
+async function writeExtensionStub(mainFile: string, virtualBundlePath: string): Promise<void> {
+  await fs.promises.writeFile(
+    mainFile,
+    `module.exports = require(${JSON.stringify(`${EXTENSION_BUNDLE_SPECIFIER_PREFIX}${virtualBundlePath}`)})\n`,
+    'utf8',
+  )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 interface InlineSourceMap {
@@ -172,6 +425,7 @@ function runtimeModulePlugin(options: BundleOptions): Plugin {
   const projectRoot = normalize(options.projectRoot)
   const projectMain = normalize(options.projectMain)
   const cocEntry = normalize(options.cocEntry)
+  const entryRoot = options.entryRoot ? normalize(options.entryRoot) : undefined
   const builtins = builtinModuleSet()
 
   return {
@@ -190,6 +444,14 @@ function runtimeModulePlugin(options: BundleOptions): Plugin {
         if (resolved.external || resolved.namespace !== 'file') return forwardResolution(resolved)
 
         const resolvedId = normalize(stripQuery(resolved.path))
+        if (entryRoot && isInside(resolvedId, entryRoot)) {
+          // Project modules are served at runtime by the module hooks from the
+          // extension bundle's registry, keeping module identity with the
+          // loaded extension. The specifier carries the path relative to the
+          // project root.
+          const relative = toPosix(path.relative(path.resolve(projectRoot), path.resolve(resolvedId)))
+          return { path: `${MODULE_SPECIFIER_PREFIX}${relative}`, external: true }
+        }
         if (resolvedId === projectMain) {
           return { path: VIRTUAL_EXTENSION, namespace: RUNTIME_NAMESPACE }
         }

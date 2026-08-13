@@ -9,13 +9,28 @@ export function findProject(startDirectory = process.cwd()): ProjectInfo {
     const packageJsonPath = path.join(directory, 'package.json')
     if (fs.existsSync(packageJsonPath) && fs.statSync(packageJsonPath).isFile()) {
       const packageJson = readJson(packageJsonPath)
+      const config = isRecord(packageJson['coc-test']) ? packageJson['coc-test'] as CocTestConfig : {}
+      const entryFile = resolveEntryFile(directory, config.entryFile)
       const main = typeof packageJson.main === 'string' ? packageJson.main : 'index.js'
       const mainFile = path.resolve(directory, main)
-      if (!fs.existsSync(mainFile) || !fs.statSync(mainFile).isFile()) {
+      if (entryFile) {
+        if (!fs.existsSync(entryFile) || !fs.statSync(entryFile).isFile()) {
+          throw new Error(`coc-test entryFile does not exist: ${entryFile}`)
+        }
+      } else if (!fs.existsSync(mainFile) || !fs.statSync(mainFile).isFile()) {
         throw new Error(`Extension main file does not exist: ${mainFile}`)
       }
-      const config = isRecord(packageJson['coc-test']) ? packageJson['coc-test'] as CocTestConfig : {}
-      return { root: directory, packageJsonPath, packageJson, mainFile, config }
+      return {
+        root: directory,
+        packageJsonPath,
+        packageJson,
+        mainFile,
+        config,
+        entryFile,
+        extensionRoot: entryFile
+          ? path.join(directory, '.coc-test-virtual', 'extension')
+          : directory,
+      }
     }
 
     const parent = path.dirname(directory)
@@ -24,6 +39,18 @@ export function findProject(startDirectory = process.cwd()): ProjectInfo {
   }
 
   throw new Error(`Could not find package.json from ${startDirectory} or its parents.`)
+}
+
+function resolveEntryFile(root: string, value: unknown): string | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || !value) {
+    throw new Error('coc-test entryFile must be a non-empty string.')
+  }
+  const resolved = path.isAbsolute(value) ? path.resolve(value) : path.resolve(root, value)
+  if (!isInside(resolved, root)) {
+    throw new Error(`coc-test entryFile must be inside the extension root: ${resolved}`)
+  }
+  return resolved
 }
 
 function readJson(filename: string): ProjectInfo['packageJson'] {
@@ -36,6 +63,12 @@ function readJson(filename: string): ProjectInfo['packageJson'] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isInside(file: string, root: string): boolean {
+  const normalizedRoot = path.resolve(root)
+  const normalizedFile = path.resolve(file)
+  return normalizedFile === normalizedRoot || normalizedFile.startsWith(`${normalizedRoot}${path.sep}`)
 }
 
 function errorMessage(error: unknown): string {

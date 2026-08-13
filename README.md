@@ -90,8 +90,11 @@ describe('extension', () => {
 })
 ```
 
-The extension import path must resolve to the same file as the package's
-`main` field.
+When the extension is built before testing, the extension import path must
+resolve to the same file as the package's `main` field. Extensions without a
+build step can configure `entryFile` instead (see
+[Configuration](#configuration)); their source modules can then be imported
+directly with relative paths.
 
 ## Configuration
 
@@ -110,6 +113,42 @@ coc.nvim settings for the test environment:
 
 These settings are written to the isolated coc.nvim configuration before the
 tests start.
+
+### entryFile
+
+When the extension source needs to be compiled before it can run (for example
+TypeScript without a build step), configure the source entry so `coc-test`
+bundles it at test time:
+
+```json
+{
+  "coc-test": {
+    "entryFile": "src/index.ts"
+  }
+}
+```
+
+With `entryFile` set, the directory containing the entry is treated as the
+extension root. `coc-test` scans every `ts`, `js`, `mjs` and `cjs` file below
+it, generates ESM code that exports them all, and bundles that code together
+with the entry using esbuild. The bundling happens once in the runner process
+and the resulting code is shared by every concurrent test child; no bundle
+file is written. The extension's own build step is not required and the
+package `main` file does not need to exist. Dependencies from `node_modules`
+are not bundled; they are required from the extension's own installation at
+runtime.
+
+Test files import project modules with normal relative paths:
+
+```ts
+import { getStore } from '../src/index.ts'
+import { store } from '../src/store.ts'
+```
+
+Every scanned module is part of the extension bundle, and `coc-test` uses
+`module.registerHooks` to serve those imports from the same module instances
+the loaded extension uses, so state is shared between the plugin and the
+tests.
 
 ## Watch mode
 

@@ -8,6 +8,11 @@ import { pathToFileURL } from 'node:url'
 import type { TestBundle } from './bundle.js'
 import { loadCocModule, removeCocTestDirs } from './coc.js'
 import { startEditor } from './editor.js'
+import {
+  createModuleRegistry,
+  registerProjectModuleHooks,
+  removeModuleRegistry,
+} from './project-modules.js'
 import { installRuntimeGlobals } from './runtime-globals.js'
 import { injectTeardownHook, TEARDOWN_KEY } from './test-code.js'
 import type {
@@ -20,6 +25,7 @@ import type {
 
 type RuntimeGlobal = typeof globalThis & {
   [TEARDOWN_KEY]?: () => void | Promise<void>
+  __coc_test_coc_exports__?: unknown
 }
 
 interface RunTestBundleOptions {
@@ -34,6 +40,7 @@ async function main(data: TestChildData, signal: AbortSignal): Promise<TestResul
   let session: Awaited<ReturnType<typeof startEditor>> | undefined
   let closePromise: Promise<void> | undefined
   let restoreGlobals: (() => void) | undefined
+  let moduleHooks: { deregister(): void } | undefined
   const closeSession = (): Promise<void> => {
     if (!session) return Promise.resolve()
     closePromise ??= Promise.resolve().then(async () => {
@@ -48,9 +55,21 @@ async function main(data: TestChildData, signal: AbortSignal): Promise<TestResul
   try {
     sendProgress(data.bundle.sourceFile, 'starting', emptyStats())
     const coc = loadCocModule(data.installation, data.editor, data.project.config['user-settings'])
+    createModuleRegistry()
+    if (data.project.entryFile) {
+      // The extension bundle reads `coc.nvim` from this global, so it must be
+      // published before the extension is loaded.
+      ;(globalThis as RuntimeGlobal).__coc_test_coc_exports__ = coc.exports
+      moduleHooks = registerProjectModuleHooks({
+        projectRoot: data.project.root,
+        entryFile: data.project.entryFile,
+        extensionRoot: data.project.extensionRoot,
+        extensionCode: data.project.extensionCode ?? '',
+      })
+    }
     session = await startEditor(data.editor, coc, data.installation.vimrc, data.project)
     if (signal.aborted) throw abortError()
-    const extension = await coc.loadExtension(data.project.root, true)
+    const extension = await coc.loadExtension(data.project.extensionRoot, true)
     restoreGlobals = installRuntimeGlobals({
       cocExports: coc.exports,
       extensionExports: extension._exports,
@@ -89,6 +108,8 @@ async function main(data: TestChildData, signal: AbortSignal): Promise<TestResul
     try {
       signal.removeEventListener('abort', onAbort)
       restoreGlobals?.()
+      moduleHooks?.deregister()
+      removeModuleRegistry()
       await closeSession()
     } finally {
       removeCocTestDirs()

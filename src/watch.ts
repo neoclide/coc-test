@@ -1,6 +1,6 @@
 import fs, { type FSWatcher } from 'node:fs'
 import path from 'node:path'
-import { bundleTests, collectExtensionWatchFiles, type BundleOptions, type TestBundle } from './bundle.js'
+import { bundleTests, buildExtensionModules, collectExtensionWatchFiles, type BundleOptions, type TestBundle } from './bundle.js'
 import { runTests, type RunTestsOptions } from './test-runner.js'
 
 export interface WatchTestsOptions extends Omit<RunTestsOptions, 'bundles' | 'signal'> {
@@ -12,7 +12,21 @@ export interface WatchTestsOptions extends Omit<RunTestsOptions, 'bundles' | 'si
 export async function watchTests(options: WatchTestsOptions): Promise<number> {
   const testFiles = options.testFiles.map(normalize)
   const bundles = new Map<string, TestBundle>()
-  let extensionFiles = await collectExtensionWatchFiles(options.bundleOptions)
+  const refreshExtensionBuild = async (): Promise<string[]> => {
+    const entryFile = options.project.config.entryFile
+    if (entryFile) {
+      const build = await buildExtensionModules({
+        projectRoot: options.project.root,
+        entryFile,
+        packageJson: options.project.packageJson,
+      })
+      options.bundleOptions = { ...options.bundleOptions, entryFile: build.entryFile, entryRoot: build.entryRoot }
+      options.project = { ...options.project, extensionRoot: build.extensionRoot, extensionCode: build.code }
+      return build.watchFiles
+    }
+    return collectExtensionWatchFiles(options.bundleOptions)
+  }
+  let extensionFiles = await refreshExtensionBuild()
   let index = new FileChangeIndex(testFiles, bundles.values(), extensionFiles)
   const watcher = new ProjectFileWatcher(changedFiles => onFilesChanged(changedFiles))
   watcher.update(index.watchFiles)
@@ -73,10 +87,14 @@ export async function watchTests(options: WatchTestsOptions): Promise<number> {
       if (extensionDirty) {
         extensionDirty = false
         try {
-          extensionFiles = await collectExtensionWatchFiles(options.bundleOptions)
+          extensionFiles = await refreshExtensionBuild()
         } catch (error) {
           exitCode = 1
-          printBuildError(options.project.root, options.bundleOptions.projectMain, error)
+          printBuildError(
+            options.project.root,
+            options.project.config.entryFile ?? options.bundleOptions.projectMain,
+            error,
+          )
         }
       }
 
