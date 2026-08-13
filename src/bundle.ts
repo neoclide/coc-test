@@ -51,6 +51,7 @@ async function bundleOne(
       entryPoints: [file],
       absWorkingDir: options.projectRoot,
       absPaths: ['metafile'],
+      mainFields: ['module', 'main'],
       bundle: true,
       format: 'cjs',
       logLevel: 'silent',
