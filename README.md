@@ -91,10 +91,10 @@ describe('extension', () => {
 ```
 
 When the extension is built before testing, the extension import path must
-resolve to the same file as the package's `main` field. Extensions without a
-build step can configure `entryFile` instead (see
-[Configuration](#configuration)); their source modules can then be imported
-directly with relative paths.
+resolve to the same file as the package's `main` field.
+
+Extensions  can configure `entryFile` (see [Configuration] (#configuration));
+their source modules can then be imported directly with relative paths.
 
 ## Configuration
 
@@ -116,8 +116,7 @@ tests start.
 
 ### entryFile
 
-When the extension source needs to be compiled before it can run (for example
-TypeScript without a build step), configure the source entry so `coc-test`
+To test TypeScript code directly, configure the source entry so `coc-test`
 bundles it at test time:
 
 ```json
