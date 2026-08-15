@@ -18,10 +18,9 @@ export async function watchTests(options: WatchTestsOptions): Promise<number> {
       const build = await buildExtensionModules({
         projectRoot: options.project.root,
         entryFile,
-        packageJson: options.project.packageJson,
       })
       options.bundleOptions = { ...options.bundleOptions, entryFile: build.entryFile, entryRoot: build.entryRoot }
-      options.project = { ...options.project, extensionRoot: build.extensionRoot, extensionCode: build.code }
+      options.project = { ...options.project, extensionCode: build.code }
       return build.watchFiles
     }
     return collectExtensionWatchFiles(options.bundleOptions)

@@ -1,6 +1,5 @@
 import { registerHooks } from 'node:module'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
 
 /**
  * Import specifier used by bundled tests to reference project modules. The
@@ -12,14 +11,6 @@ export const MODULE_SPECIFIER_PREFIX = 'coc-test-module:'
 
 /** Global registry populated by the bundled extension and read by the module hooks. */
 export const MODULE_REGISTRY_KEY = '__coc_test_modules__'
-
-/** Specifier prefix used by the extension stub to reach the in-memory bundle. */
-export const EXTENSION_BUNDLE_SPECIFIER_PREFIX = 'coc-test-extension:'
-
-/** Virtual module path used as the bundle module's identity. */
-export function extensionBundlePath(extensionRoot: string): string {
-  return path.join(path.resolve(extensionRoot), 'index.bundle.js')
-}
 
 type Registry = Record<string, unknown>
 
@@ -42,28 +33,18 @@ export interface ProjectModuleHooks {
 }
 
 /**
- * Serve project module imports and the extension bundle code.
+ * Serve project module imports from the extension bundle's module registry.
  *
- * The extension bundle references `coc.nvim` through the shared
- * `__coc_test_coc_exports__` global, so the bundle code is independent of the
- * sandbox and can be served directly by these hooks. Test bundles reference
- * project modules through the `coc-test-module:` specifier, which is served
- * from the extension bundle's module registry.
+ * Test bundles reference project modules through the `coc-test-module:`
+ * specifier, which resolves to the module instances the loaded extension uses.
  */
 export function registerProjectModuleHooks(options: {
   projectRoot: string
   entryFile: string
-  extensionRoot: string
-  extensionCode: string
 }): ProjectModuleHooks {
-  const bundlePath = extensionBundlePath(options.extensionRoot)
-  const bundleUrl = pathToFileURL(bundlePath).href
   const normalizedEntry = normalizePath(options.entryFile)
   return registerHooks({
     resolve(specifier, context, nextResolve) {
-      if (specifier.startsWith(EXTENSION_BUNDLE_SPECIFIER_PREFIX)) {
-        return { url: bundleUrl, shortCircuit: true }
-      }
       if (specifier.startsWith(MODULE_SPECIFIER_PREFIX)) {
         return { url: specifier, shortCircuit: true }
       }
@@ -71,13 +52,6 @@ export function registerProjectModuleHooks(options: {
     },
 
     load(url, context, nextLoad) {
-      if (url === bundleUrl) {
-        return {
-          format: 'commonjs',
-          source: options.extensionCode,
-          shortCircuit: true,
-        }
-      }
       if (!url.startsWith(MODULE_SPECIFIER_PREFIX)) return nextLoad(url, context)
       const file = normalizePath(resolveModulePath(options.projectRoot, url.slice(MODULE_SPECIFIER_PREFIX.length)))
       if (file === normalizedEntry) {

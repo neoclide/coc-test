@@ -9,13 +9,7 @@ import {
   type PluginBuild,
   type ResolveResult,
 } from 'esbuild'
-import {
-  extensionBundlePath,
-  EXTENSION_BUNDLE_SPECIFIER_PREFIX,
-  MODULE_REGISTRY_KEY,
-  MODULE_SPECIFIER_PREFIX,
-} from './project-modules.js'
-import type { ProjectInfo } from './types.js'
+import { MODULE_REGISTRY_KEY, MODULE_SPECIFIER_PREFIX } from './project-modules.js'
 
 export interface BundleOptions {
   projectRoot: string
@@ -35,19 +29,16 @@ export interface TestBundle {
 }
 
 export interface ExtensionModuleBuild {
-  extensionRoot: string
   entryFile: string
   entryRoot: string
   /** Bundled extension code, shared by every concurrent test child. */
   code: string
-  mainFile: string
   watchFiles: string[]
 }
 
 export interface BuildExtensionModulesOptions {
   projectRoot: string
   entryFile: string
-  packageJson: ProjectInfo['packageJson']
 }
 
 const RUNTIME_NAMESPACE = 'coc-test-runtime'
@@ -145,24 +136,21 @@ async function collectInternalModules(projectRoot: string, entryFile: string): P
  * `entryFile` source and bundled by esbuild into a single CommonJS file, so
  * the extension and the registry reference the same module instances. External
  * dependencies stay un-bundled and are required from the extension's own
- * installation at runtime.
+ * installation at runtime. No files are written: the bundle code is passed to
+ * coc.nvim through the loader's `sourceCode` option and the project's own
+ * package.json provides the extension metadata.
  */
 export async function buildExtensionModules(options: BuildExtensionModulesOptions): Promise<ExtensionModuleBuild> {
   const projectRoot = normalize(options.projectRoot)
   const entryFile = normalize(options.entryFile)
   const entryRoot = path.dirname(entryFile)
-  const extensionRoot = path.join(projectRoot, '.coc-test-virtual', 'extension')
   const scannedFiles = scanModuleFiles(entryRoot)
   if (!scannedFiles.includes(entryFile)) {
     throw new Error(`coc-test entryFile is not a module file: ${options.entryFile}`)
   }
 
-  fs.rmSync(extensionRoot, { recursive: true, force: true })
-  fs.mkdirSync(extensionRoot, { recursive: true })
-
   const entrySource = fs.readFileSync(path.resolve(entryFile), 'utf8')
   const source = `${entrySource}\n${generateModuleManifest(entryFile, scannedFiles)}`
-  const mainFile = path.join(extensionRoot, 'index.js')
   const build = await esbuild({
     entryPoints: [entryFile],
     absWorkingDir: path.resolve(projectRoot),
@@ -183,15 +171,10 @@ export async function buildExtensionModules(options: BuildExtensionModulesOption
   }
   const code = build.outputFiles[0].text
 
-  await writeExtensionPackageJson(extensionRoot, mainFile, options.packageJson)
-  await writeExtensionStub(mainFile, extensionBundlePath(extensionRoot))
-
   return {
-    extensionRoot,
     entryFile,
     entryRoot,
     code,
-    mainFile,
     watchFiles: [...scannedFiles].sort(),
   }
 }
@@ -344,43 +327,6 @@ function toPosix(value: string): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-async function writeExtensionPackageJson(
-  extensionRoot: string,
-  mainFile: string,
-  packageJson: ProjectInfo['packageJson'],
-): Promise<void> {
-  const engines = isRecord(packageJson.engines) ? packageJson.engines : {}
-  const name = typeof packageJson.name === 'string' && packageJson.name ? packageJson.name : 'coc-test-extension'
-  const content = {
-    name,
-    main: toPosix(path.relative(extensionRoot, mainFile)),
-    engines: {
-      coc: typeof engines.coc === 'string' ? engines.coc : '>=0.0.1',
-    },
-    activationEvents: Array.isArray(packageJson.activationEvents)
-      ? packageJson.activationEvents
-      : ['*'],
-  }
-  await fs.promises.writeFile(
-    path.join(extensionRoot, 'package.json'),
-    `${JSON.stringify(content, null, 2)}\n`,
-    'utf8',
-  )
-}
-
-/** One-line loader that reaches the in-memory bundle through the module hooks. */
-async function writeExtensionStub(mainFile: string, virtualBundlePath: string): Promise<void> {
-  await fs.promises.writeFile(
-    mainFile,
-    `module.exports = require(${JSON.stringify(`${EXTENSION_BUNDLE_SPECIFIER_PREFIX}${virtualBundlePath}`)})\n`,
-    'utf8',
-  )
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 interface InlineSourceMap {

@@ -29,17 +29,20 @@ export interface ProjectInfo {
   config: CocTestConfig
   /** Absolute path of the configured `coc-test.entryFile`, when set. */
   entryFile?: string
-  /** Bundled extension code produced by the parent process, shared by test children. */
+  /** Bundled extension code produced by the parent process, loaded through the coc.nvim `sourceCode` option. */
   extensionCode?: string
-  /** Directory passed to `coc.loadExtension`; points at the bundled entry when `entryFile` is set. */
-  extensionRoot: string
+}
+
+export interface ExtensionLoadOptions {
+  sourceCode?: string
+  extensionRoot?: string
 }
 
 export interface CocModule {
   exports: unknown
   dispose?: () => void
   attach(options: { proc: ChildProcess } | { reader: NodeJS.ReadableStream; writer: NodeJS.WritableStream }): CocPlugin
-  loadExtension(filename: string, active: boolean): Promise<{ _exports: unknown }>
+  loadExtension(filename: string, active: boolean, options?: ExtensionLoadOptions): Promise<{ _exports: unknown }>
   [key: string]: unknown
 }
 

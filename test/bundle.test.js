@@ -7,8 +7,6 @@ import test from 'node:test'
 import { bundleTests, buildExtensionModules } from '../lib/bundle.js'
 import {
   createModuleRegistry,
-  extensionBundlePath,
-  EXTENSION_BUNDLE_SPECIFIER_PREFIX,
   MODULE_REGISTRY_KEY,
   MODULE_SPECIFIER_PREFIX,
   registerProjectModuleHooks,
@@ -68,7 +66,6 @@ test('findProject resolves entryFile without requiring the main file', async t =
   const project = findProject(root)
 
   assert.equal(project.entryFile, path.join(root, 'src', 'index.ts'))
-  assert.equal(project.extensionRoot, path.join(root, '.coc-test-virtual', 'extension'))
   assert.equal(project.mainFile, path.join(root, 'lib', 'index.js'))
 })
 
@@ -82,16 +79,15 @@ test('findProject rejects a missing coc-test entryFile', async t => {
   assert.throws(() => findProject(root), /coc-test entryFile does not exist/)
 })
 
-test('buildExtensionModules returns bundle code instead of writing a bundle file', async t => {
+test('buildExtensionModules returns bundle code without writing extension files', async t => {
   const root = await createFixture(t)
   const project = findProject(root)
   const build = await buildExtensionModules({
     projectRoot: project.root,
     entryFile: project.entryFile,
-    packageJson: project.packageJson,
   })
 
-  assert.equal(build.mainFile, path.join(build.extensionRoot, 'index.js'))
+  assert.equal(build.entryFile, path.join(root, 'src', 'index.ts'))
   assert.equal(build.entryRoot, path.join(root, 'src'))
 
   const code = build.code
@@ -109,25 +105,16 @@ test('buildExtensionModules returns bundle code instead of writing a bundle file
   assert.ok(code.includes('__coc_test_coc_exports__'))
   assert.doesNotMatch(code, /require\(["']coc\.nvim["']\)/)
 
-  // No bundle file is written; the bundle code is served from memory.
-  await assert.rejects(fs.access(extensionBundlePath(build.extensionRoot)))
-  // The on-disk main is a one-line loader for the in-memory bundle code.
-  const stub = await fs.readFile(build.mainFile, 'utf8')
-  assert.equal(
-    stub,
-    `module.exports = require(${JSON.stringify(`${EXTENSION_BUNDLE_SPECIFIER_PREFIX}${extensionBundlePath(build.extensionRoot)}`)})\n`,
-  )
+  // No bundle file or generated package.json is written; the extension root is
+  // the project itself and its real package.json is reused by coc.nvim.
+  await assert.rejects(fs.access(path.join(root, '.coc-test-virtual')))
+  await assert.rejects(fs.access(path.join(root, 'index.bundle.js')))
 
   assert.deepEqual(build.watchFiles, [
     helper,
     path.join(root, 'src', 'index.ts'),
     shared,
   ])
-
-  const pkg = JSON.parse(await fs.readFile(path.join(build.extensionRoot, 'package.json'), 'utf8'))
-  assert.equal(pkg.name, 'coc-test-bundle-fixture')
-  assert.equal(pkg.main, 'index.js')
-  assert.deepEqual(pkg.engines, { coc: '>=0.0.1' })
 })
 
 test('bundleTests rewrites relative project imports to registry specifiers', async t => {
@@ -136,7 +123,6 @@ test('bundleTests rewrites relative project imports to registry specifiers', asy
   const build = await buildExtensionModules({
     projectRoot: project.root,
     entryFile: project.entryFile,
-    packageJson: project.packageJson,
   })
   const testFile = path.join(root, 'test', 'sample.test.ts')
   await fs.mkdir(path.dirname(testFile), { recursive: true })
@@ -181,8 +167,6 @@ test('module hooks serve registry instances for project module specifiers', asyn
   const hooks = registerProjectModuleHooks({
     projectRoot: root,
     entryFile: entry,
-    extensionRoot: path.join(root, '.coc-test-virtual', 'extension'),
-    extensionCode: 'module.exports = {}\n',
   })
   t.after(() => hooks.deregister())
 
@@ -197,30 +181,6 @@ test('module hooks serve registry instances for project module specifiers', asyn
   const loaded = require(modulePath)
   assert.equal(loaded.store, registry[store])
   assert.equal(loaded.extension, globalThis.__coc_test_extension_exports__)
-})
-
-test('module hooks serve the shared extension bundle code', async t => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'coc-test-bundle-'))
-  t.after(() => fs.rm(root, { recursive: true, force: true }))
-  const extensionRoot = path.join(root, 'extension')
-  const virtual = extensionBundlePath(extensionRoot)
-  const entry = path.join(root, 'src', 'index.ts')
-  const hooks = registerProjectModuleHooks({
-    projectRoot: root,
-    entryFile: entry,
-    extensionRoot,
-    extensionCode: "module.exports = { value: 42, coc: globalThis.__coc_test_coc_exports__ }\n",
-  })
-  t.after(() => hooks.deregister())
-
-  const loader = path.join(root, 'loader.cjs')
-  await fs.writeFile(
-    loader,
-    `module.exports = require(${JSON.stringify(`${EXTENSION_BUNDLE_SPECIFIER_PREFIX}${virtual}`)})\n`,
-  )
-  const loaded = require(loader)
-  assert.equal(loaded.value, 42)
-  assert.equal(loaded.coc, globalThis.__coc_test_coc_exports__)
 })
 
 test('module registry helpers create and remove the shared registry', t => {

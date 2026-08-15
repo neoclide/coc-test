@@ -34,9 +34,7 @@ export async function execute(options: CliOptions): Promise<number> {
     const build = await buildExtensionModules({
       projectRoot: project.root,
       entryFile: project.config.entryFile,
-      packageJson: project.packageJson,
     })
-    project.extensionRoot = build.extensionRoot
     project.extensionCode = build.code
     bundleOptions.entryFile = build.entryFile
     bundleOptions.entryRoot = build.entryRoot

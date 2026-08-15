@@ -15,6 +15,7 @@ import {
 } from './project-modules.js'
 import { installRuntimeGlobals } from './runtime-globals.js'
 import { injectTeardownHook, TEARDOWN_KEY } from './test-code.js'
+import type { CocModule, ProjectInfo } from './types.js'
 import type {
   TestChildCommand,
   TestChildData,
@@ -63,13 +64,11 @@ async function main(data: TestChildData, signal: AbortSignal): Promise<TestResul
       moduleHooks = registerProjectModuleHooks({
         projectRoot: data.project.root,
         entryFile: data.project.entryFile,
-        extensionRoot: data.project.extensionRoot,
-        extensionCode: data.project.extensionCode ?? '',
       })
     }
     session = await startEditor(data.editor, coc, data.installation.vimrc, data.project)
     if (signal.aborted) throw abortError()
-    const extension = await coc.loadExtension(data.project.extensionRoot, true)
+    const extension = await loadTestExtension(coc, data.project)
     restoreGlobals = installRuntimeGlobals({
       cocExports: coc.exports,
       extensionExports: extension._exports,
@@ -115,6 +114,21 @@ async function main(data: TestChildData, signal: AbortSignal): Promise<TestResul
       removeCocTestDirs()
     }
   }
+}
+
+async function loadTestExtension(
+  coc: CocModule,
+  project: ProjectInfo,
+): Promise<{ _exports: unknown }> {
+  if (!project.entryFile) return coc.loadExtension(project.root, true)
+  const sourceCode = project.extensionCode
+  if (typeof sourceCode !== 'string') {
+    throw new Error('coc-test extension code is missing; rebuild the extension bundle.')
+  }
+  return coc.loadExtension(project.root, true, {
+    sourceCode,
+    extensionRoot: project.root,
+  })
 }
 
 async function runTestBundle(

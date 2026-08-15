@@ -27,9 +27,6 @@ export function findProject(startDirectory = process.cwd()): ProjectInfo {
         mainFile,
         config,
         entryFile,
-        extensionRoot: entryFile
-          ? path.join(directory, '.coc-test-virtual', 'extension')
-          : directory,
       }
     }
 
