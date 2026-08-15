@@ -1,6 +1,6 @@
 {
   "name": "coc-test",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Integration test runner for coc.nvim extensions",
   "license": "MIT",
   "type": "module",

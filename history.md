@@ -1,3 +1,7 @@
+## 0.1.5
+
+- add repository to package.json (1704129)
+
 ## 0.1.4
 
 - chore: add MIT license (48a6396)
