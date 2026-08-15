@@ -4,6 +4,10 @@
   "description": "Integration test runner for coc.nvim extensions",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neoclide/coc-test.git"
+  },
   "bin": {
     "coc-test": "bin/coc-test"
   },
