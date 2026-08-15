@@ -127,18 +127,6 @@ bundles it at test time:
 }
 ```
 
-The directory containing the entry is treated as the extension root. `coc-test`
-scans every `ts`, `js`, `mjs` and `cjs` file below it, generates ESM code that
-exports them all, and bundles that code together with the entry using esbuild.
-The bundling happens once in the runner process and the resulting code is
-shared by every concurrent test child; the bundle is passed to coc.nvim through
-the extension loader's `sourceCode` option, so no bundle file and no generated
-`package.json` are written. The extension's own build step is not required and
-the package `main` file does not need to exist. The project's own `package.json`
-provides the extension metadata, so contributions and activation events behave
-like a normal installation. Dependencies from `node_modules` are not bundled;
-they are required from the extension's own installation at runtime.
-
 Test files import project modules with normal relative paths:
 
 ```ts
@@ -146,10 +134,9 @@ import { getStore } from '../src/index.ts'
 import { store } from '../src/store.ts'
 ```
 
-Every scanned module is part of the extension bundle, and `coc-test` uses
-`module.registerHooks` to serve those imports from the same module instances
-the loaded extension uses, so state is shared between the plugin and the
-tests.
+These imports resolve to the same module instances the plugin itself runs, so
+state is shared between the plugin and the tests instead of loading independent
+copies.
 
 ## Watch mode
 

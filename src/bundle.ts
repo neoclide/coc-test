@@ -129,7 +129,8 @@ async function collectInternalModules(projectRoot: string, entryFile: string): P
 /**
  * Bundle the extension for testing.
  *
- * The directory containing `entryFile` is treated as the extension root. Every
+ * The project root (the directory containing `package.json`) is the extension
+ * root; the directory containing `entryFile` is the bundling root, and every
  * `ts`, `js`, `mjs` and `cjs` file below it is scanned and a manifest module is
  * generated that imports each one and registers its exports in the shared
  * `__coc_test_modules__` registry. The manifest is concatenated with the
