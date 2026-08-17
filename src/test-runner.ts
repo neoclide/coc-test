@@ -47,7 +47,9 @@ export async function runTests(options: RunTestsOptions): Promise<boolean> {
       }
     }
   }
-  const concurrency = Math.min(options.bundles.length, Math.max(1, availableParallelism() - 1))
+  // Each test file starts an editor in a separate child process. Run only one
+  // child at a time on CI so editor startup cannot contend with another test.
+  const concurrency = getTestConcurrency(options.bundles.length)
   await Promise.all(Array.from({ length: concurrency }, runNext))
   if (options.signal?.aborted) {
     reporter.abort()
@@ -56,6 +58,15 @@ export async function runTests(options: RunTestsOptions): Promise<boolean> {
   reporter.finish(results)
 
   return results.every(result => result?.passed ?? false)
+}
+
+export function getTestConcurrency(
+  bundleCount: number,
+  ci = Boolean(process.env.CI),
+  parallelism = availableParallelism(),
+): number {
+  if (ci) return 1
+  return Math.min(bundleCount, Math.max(1, parallelism - 1))
 }
 
 function runTestChild(
