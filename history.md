@@ -1,3 +1,9 @@
+## 0.1.6
+
+- Merge pull request #1 from neoclide/fix/serialize-ci-editor-tests (cf626b0)
+- fix: serialize test children on CI (c088349)
+- add license to package-lock.json (0568c98)
+
 ## 0.1.5
 
 - add repository to package.json (1704129)
