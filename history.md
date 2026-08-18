@@ -1,3 +1,7 @@
+## 0.1.7
+
+- feat: bundle entryFile dependencies by default (53fde22)
+
 ## 0.1.6
 
 - Merge pull request #1 from neoclide/fix/serialize-ci-editor-tests (cf626b0)
