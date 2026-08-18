@@ -15,7 +15,13 @@ export interface CliOptions {
 export interface CocTestConfig {
   'user-settings'?: Record<string, unknown>
   entryFile?: string
+  /** Dependencies to leave external when bundling `entryFile`; passed to esbuild's `external` option. */
+  externals?: string[]
+  /** Output module format for the `entryFile` bundle. Defaults to CommonJS. */
+  target?: ExtensionTarget
 }
+
+export type ExtensionTarget = 'commonjs' | 'esm'
 
 export interface ProjectInfo {
   root: string
@@ -35,6 +41,8 @@ export interface ProjectInfo {
 
 export interface ExtensionLoadOptions {
   sourceCode?: string
+  sourceFormat?: 'commonjs' | 'module'
+  sourceFilename?: string
   extensionRoot?: string
 }
 

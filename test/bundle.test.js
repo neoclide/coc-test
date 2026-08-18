@@ -1,29 +1,35 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { bundleTests, buildExtensionModules } from '../lib/bundle.js'
 import {
+  assertModuleHooksAvailable,
   createModuleRegistry,
+  MODULE_HOOKS_REQUIRED_MESSAGE,
   MODULE_REGISTRY_KEY,
-  MODULE_SPECIFIER_PREFIX,
-  registerProjectModuleHooks,
   removeModuleRegistry,
 } from '../lib/project-modules.js'
 import { findProject } from '../lib/project.js'
-
-const require = createRequire(import.meta.url)
 
 async function createFixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'coc-test-bundle-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   await fs.mkdir(path.join(root, 'src'), { recursive: true })
   await fs.mkdir(path.join(root, 'node_modules', 'fake-lib'), { recursive: true })
+  await fs.mkdir(path.join(root, 'node_modules', 'esm-only'), { recursive: true })
   await fs.writeFile(
     path.join(root, 'node_modules', 'fake-lib', 'index.js'),
     'module.exports = { pkg: true }\n',
+  )
+  await fs.writeFile(
+    path.join(root, 'node_modules', 'esm-only', 'package.json'),
+    JSON.stringify({ name: 'esm-only', type: 'module', exports: './index.js' }),
+  )
+  await fs.writeFile(
+    path.join(root, 'node_modules', 'esm-only', 'index.js'),
+    'export const esmValue = "esm dependency marker"\n',
   )
   await fs.writeFile(
     path.join(root, 'src', 'index.ts'),
@@ -32,10 +38,12 @@ async function createFixture(t) {
       "import { helper, store } from './helper'",
       "import { shared } from './shared.js'",
       "import { pkg } from 'fake-lib'",
+      "import { esmValue } from 'esm-only'",
       'export const getHelper = () => helper',
       'export const getShared = () => shared',
       'export const getStore = () => store',
       'export const getPkg = () => pkg',
+      'export const getEsmValue = () => esmValue',
       'export const isCocReady = () => !!workspace',
     ].join('\n') + '\n',
   )
@@ -89,6 +97,7 @@ test('buildExtensionModules returns bundle code without writing extension files'
 
   assert.equal(build.entryFile, path.join(root, 'src', 'index.ts'))
   assert.equal(build.entryRoot, path.join(root, 'src'))
+  assert.equal(build.target, 'commonjs')
 
   const code = build.code
   const helper = path.join(root, 'src', 'helper.ts')
@@ -99,8 +108,9 @@ test('buildExtensionModules returns bundle code without writing extension files'
   assert.ok(code.includes(MODULE_REGISTRY_KEY))
   // Internal modules are bundled into the single output file.
   assert.match(code, /H" \+ shared/)
-  // External dependencies stay un-bundled.
-  assert.match(code, /require\(["']fake-lib["']\)/)
+  // Package dependencies are bundled by default.
+  assert.match(code, /esm dependency marker/)
+  assert.doesNotMatch(code, /require\(["']fake-lib["']\)/)
   // `coc.nvim` is rewritten to the shared global instead of a bare require.
   assert.ok(code.includes('__coc_test_coc_exports__'))
   assert.doesNotMatch(code, /require\(["']coc\.nvim["']\)/)
@@ -115,6 +125,39 @@ test('buildExtensionModules returns bundle code without writing extension files'
     path.join(root, 'src', 'index.ts'),
     shared,
   ])
+})
+
+test('keeps configured externals outside an ESM extension bundle', async t => {
+  const root = await createFixture(t)
+  const entryFile = path.join(root, 'src', 'index.ts')
+  const build = await buildExtensionModules({
+    projectRoot: root,
+    entryFile,
+    target: 'esm',
+    externals: ['fake-lib', 'esm-only'],
+  })
+
+  assert.equal(build.target, 'esm')
+  assert.match(build.code, /from ["']fake-lib["']/)
+  assert.match(build.code, /from ["']esm-only["']/)
+  assert.doesNotMatch(build.code, /esm dependency marker/)
+})
+
+test('findProject validates entryFile bundle options', async t => {
+  const root = await createFixture(t)
+  const packageJson = path.join(root, 'package.json')
+  await fs.writeFile(packageJson, JSON.stringify({
+    'coc-test': { entryFile: 'src/index.ts', target: 'esm', externals: ['fake-lib'] },
+  }))
+  const project = findProject(root)
+  assert.equal(project.config.target, 'esm')
+  assert.deepEqual(project.config.externals, ['fake-lib'])
+
+  await fs.writeFile(packageJson, JSON.stringify({ 'coc-test': { entryFile: 'src/index.ts', target: 'cjs' } }))
+  assert.throws(() => findProject(root), /coc-test target must be "commonjs" or "esm"/)
+
+  await fs.writeFile(packageJson, JSON.stringify({ 'coc-test': { entryFile: 'src/index.ts', externals: ['fake-lib', ''] } }))
+  assert.throws(() => findProject(root), /coc-test externals must be an array of non-empty strings/)
 })
 
 test('bundleTests rewrites relative project imports to registry specifiers', async t => {
@@ -144,43 +187,13 @@ test('bundleTests rewrites relative project imports to registry specifiers', asy
   })
 
   const helper = path.posix.join('src', 'helper.ts')
-  const entry = path.posix.join('src', 'index.ts')
-  assert.ok(bundle.code.includes(`${MODULE_SPECIFIER_PREFIX}${helper}`))
-  assert.ok(bundle.code.includes(`${MODULE_SPECIFIER_PREFIX}${entry}`))
-  // Project modules are not inlined into the test bundle.
+  assert.ok(bundle.code.includes('__coc_test_modules__'))
+  assert.ok(bundle.code.includes(helper))
+  assert.ok(bundle.code.includes('__coc_test_extension_exports__'))
+  assert.doesNotMatch(bundle.code, /require\(["']coc-test-module:/)
+  // Project module source is not inlined into the test bundle.
   assert.doesNotMatch(bundle.code, /H' \+ shared/)
   assert.doesNotMatch(bundle.code, /require\(["']fake-lib["']\)/)
-})
-
-test('module hooks serve registry instances for project module specifiers', async t => {
-  const root = await createFixture(t)
-  const entry = path.join(root, 'src', 'index.ts')
-  const store = path.join(root, 'src', 'store.ts')
-  const registry = { [store]: { store: { n: 42 } } }
-  globalThis[MODULE_REGISTRY_KEY] = registry
-  globalThis.__coc_test_extension_exports__ = { activate() {} }
-  t.after(() => {
-    delete globalThis[MODULE_REGISTRY_KEY]
-    delete globalThis.__coc_test_extension_exports__
-  })
-
-  const hooks = registerProjectModuleHooks({
-    projectRoot: root,
-    entryFile: entry,
-  })
-  t.after(() => hooks.deregister())
-
-  const modulePath = path.join(root, 'consumer.cjs')
-  await fs.writeFile(
-    modulePath,
-    `module.exports = {
-  store: require(${JSON.stringify(`${MODULE_SPECIFIER_PREFIX}src/store.ts`)}),
-  extension: require(${JSON.stringify(`${MODULE_SPECIFIER_PREFIX}src/index.ts`)}),
-}\n`,
-  )
-  const loaded = require(modulePath)
-  assert.equal(loaded.store, registry[store])
-  assert.equal(loaded.extension, globalThis.__coc_test_extension_exports__)
 })
 
 test('module registry helpers create and remove the shared registry', t => {
@@ -189,4 +202,11 @@ test('module registry helpers create and remove the shared registry', t => {
   assert.ok(globalThis[MODULE_REGISTRY_KEY])
   removeModuleRegistry()
   assert.equal(globalThis[MODULE_REGISTRY_KEY], undefined)
+})
+
+test('reports an actionable error when synchronous module hooks are unavailable', () => {
+  assert.throws(
+    () => assertModuleHooksAvailable(null),
+    error => error instanceof Error && error.message === MODULE_HOOKS_REQUIRED_MESSAGE,
+  )
 })

@@ -1,22 +1,37 @@
-import { registerHooks } from 'node:module'
-import path from 'node:path'
-
+import * as module from 'node:module'
 /**
- * Import specifier used by bundled tests to reference project modules. The
- * value after the prefix is the absolute path of the source file. The esbuild
- * runtime plugin rewrites relative project imports to this specifier, and the
- * hooks below resolve it to the same module instance the extension bundle uses.
+ * Internal esbuild namespace for runtime shims that read project modules from
+ * the extension bundle's registry.
  */
 export const MODULE_SPECIFIER_PREFIX = 'coc-test-module:'
 
-/** Global registry populated by the bundled extension and read by the module hooks. */
+/** Global registry populated by the bundled extension and read by test shims. */
 export const MODULE_REGISTRY_KEY = '__coc_test_modules__'
+
+export const MODULE_HOOKS_REQUIRED_MESSAGE =
+  'coc-test requires Node.js module.registerHooks support (Node.js 22.15.0 or newer).'
 
 type Registry = Record<string, unknown>
 
 interface RegistryGlobal {
   [MODULE_REGISTRY_KEY]?: Registry
   __coc_test_extension_exports__?: unknown
+}
+
+/**
+ * `module.registerHooks()` was added in Node.js 22.15.0. Use a namespace
+ * import so older Node.js versions can reach this diagnostic instead of
+ * failing while evaluating a named import from `node:module`.
+ */
+export function assertModuleHooksAvailable(registerHooks: unknown = module.registerHooks): void {
+  if (typeof registerHooks !== 'function') throw new Error(MODULE_HOOKS_REQUIRED_MESSAGE)
+}
+
+export function registerModuleHooks(
+  options: Parameters<typeof module.registerHooks>[0],
+): ReturnType<typeof module.registerHooks> {
+  assertModuleHooksAvailable()
+  return module.registerHooks(options)
 }
 
 /** Create the shared module registry before the extension bundle is loaded. */
@@ -26,77 +41,4 @@ export function createModuleRegistry(): void {
 
 export function removeModuleRegistry(): void {
   delete (globalThis as RegistryGlobal)[MODULE_REGISTRY_KEY]
-}
-
-export interface ProjectModuleHooks {
-  deregister(): void
-}
-
-/**
- * Serve project module imports from the extension bundle's module registry.
- *
- * Test bundles reference project modules through the `coc-test-module:`
- * specifier, which resolves to the module instances the loaded extension uses.
- */
-export function registerProjectModuleHooks(options: {
-  projectRoot: string
-  entryFile: string
-}): ProjectModuleHooks {
-  const normalizedEntry = normalizePath(options.entryFile)
-  return registerHooks({
-    resolve(specifier, context, nextResolve) {
-      if (specifier.startsWith(MODULE_SPECIFIER_PREFIX)) {
-        return { url: specifier, shortCircuit: true }
-      }
-      return nextResolve(specifier, context)
-    },
-
-    load(url, context, nextLoad) {
-      if (!url.startsWith(MODULE_SPECIFIER_PREFIX)) return nextLoad(url, context)
-      const file = normalizePath(resolveModulePath(options.projectRoot, url.slice(MODULE_SPECIFIER_PREFIX.length)))
-      if (file === normalizedEntry) {
-        return runtimeCommonJsModule('__coc_test_extension_exports__', 'extension exports')
-      }
-      const global = globalThis as RegistryGlobal
-      const registry = global[MODULE_REGISTRY_KEY]
-      if (registry === undefined) {
-        throw new Error(`coc-test module registry is unavailable for ${file}`)
-      }
-      if (registry[file] === undefined) {
-        throw new Error(`coc-test module is not part of the extension bundle: ${file}`)
-      }
-      return {
-        format: 'commonjs',
-        source: `module.exports = globalThis[${JSON.stringify(MODULE_REGISTRY_KEY)}][${JSON.stringify(file)}]`,
-        shortCircuit: true,
-      }
-    },
-  })
-}
-
-function runtimeCommonJsModule(globalKey: string, label: string) {
-  return {
-    format: 'commonjs' as const,
-    source: `
-const value = globalThis[${JSON.stringify(globalKey)}]
-if (value === undefined) {
-  throw new Error(${JSON.stringify(`coc-test runtime value is unavailable: ${label}`)})
-}
-module.exports = value
-`,
-    shortCircuit: true,
-  }
-}
-
-function normalizePath(value: string): string {
-  return path.resolve(value).replaceAll('\\', '/')
-}
-
-function resolveModulePath(projectRoot: string, value: string): string {
-  const stripped = stripQuery(value)
-  return path.isAbsolute(stripped) ? stripped : path.resolve(projectRoot, stripped)
-}
-
-function stripQuery(value: string): string {
-  return value.replace(/[?#].*$/, '')
 }

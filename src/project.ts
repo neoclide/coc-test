@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { CocTestConfig, ProjectInfo } from './types.js'
+import type { CocTestConfig, ExtensionTarget, ProjectInfo } from './types.js'
 
 export function findProject(startDirectory = process.cwd()): ProjectInfo {
   let directory = path.resolve(startDirectory)
@@ -9,7 +9,7 @@ export function findProject(startDirectory = process.cwd()): ProjectInfo {
     const packageJsonPath = path.join(directory, 'package.json')
     if (fs.existsSync(packageJsonPath) && fs.statSync(packageJsonPath).isFile()) {
       const packageJson = readJson(packageJsonPath)
-      const config = isRecord(packageJson['coc-test']) ? packageJson['coc-test'] as CocTestConfig : {}
+      const config = resolveConfig(packageJson['coc-test'])
       const entryFile = resolveEntryFile(directory, config.entryFile)
       const main = typeof packageJson.main === 'string' ? packageJson.main : 'index.js'
       const mainFile = path.resolve(directory, main)
@@ -36,6 +36,28 @@ export function findProject(startDirectory = process.cwd()): ProjectInfo {
   }
 
   throw new Error(`Could not find package.json from ${startDirectory} or its parents.`)
+}
+
+function resolveConfig(value: unknown): CocTestConfig {
+  if (!isRecord(value)) return {}
+  const config = value as CocTestConfig
+  const target = resolveTarget(config.target)
+  const externals = resolveExternals(config.externals)
+  return { ...config, target, externals }
+}
+
+function resolveTarget(value: unknown): ExtensionTarget | undefined {
+  if (value === undefined) return undefined
+  if (value === 'commonjs' || value === 'esm') return value
+  throw new Error('coc-test target must be "commonjs" or "esm".')
+}
+
+function resolveExternals(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string' || !item)) {
+    throw new Error('coc-test externals must be an array of non-empty strings.')
+  }
+  return value
 }
 
 function resolveEntryFile(root: string, value: unknown): string | undefined {

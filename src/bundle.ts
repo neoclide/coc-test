@@ -10,6 +10,7 @@ import {
   type ResolveResult,
 } from 'esbuild'
 import { MODULE_REGISTRY_KEY, MODULE_SPECIFIER_PREFIX } from './project-modules.js'
+import type { ExtensionTarget } from './types.js'
 
 export interface BundleOptions {
   projectRoot: string
@@ -31,6 +32,7 @@ export interface TestBundle {
 export interface ExtensionModuleBuild {
   entryFile: string
   entryRoot: string
+  target: ExtensionTarget
   /** Bundled extension code, shared by every concurrent test child. */
   code: string
   watchFiles: string[]
@@ -39,6 +41,8 @@ export interface ExtensionModuleBuild {
 export interface BuildExtensionModulesOptions {
   projectRoot: string
   entryFile: string
+  externals?: string[]
+  target?: ExtensionTarget
 }
 
 const RUNTIME_NAMESPACE = 'coc-test-runtime'
@@ -134,10 +138,11 @@ async function collectInternalModules(projectRoot: string, entryFile: string): P
  * `ts`, `js`, `mjs` and `cjs` file below it is scanned and a manifest module is
  * generated that imports each one and registers its exports in the shared
  * `__coc_test_modules__` registry. The manifest is concatenated with the
- * `entryFile` source and bundled by esbuild into a single CommonJS file, so
+ * `entryFile` source and bundled by esbuild into one CommonJS file by default,
+ * or an ESM file when configured, so
  * the extension and the registry reference the same module instances. External
- * dependencies stay un-bundled and are required from the extension's own
- * installation at runtime. No files are written: the bundle code is passed to
+ * dependencies are bundled unless listed in `externals`. No files are written:
+ * the bundle code is passed to
  * coc.nvim through the loader's `sourceCode` option and the project's own
  * package.json provides the extension metadata.
  */
@@ -145,6 +150,8 @@ export async function buildExtensionModules(options: BuildExtensionModulesOption
   const projectRoot = normalize(options.projectRoot)
   const entryFile = normalize(options.entryFile)
   const entryRoot = path.dirname(entryFile)
+  const target = options.target ?? 'commonjs'
+  const externals = options.externals ?? []
   const scannedFiles = scanModuleFiles(entryRoot)
   if (!scannedFiles.includes(entryFile)) {
     throw new Error(`coc-test entryFile is not a module file: ${options.entryFile}`)
@@ -156,13 +163,14 @@ export async function buildExtensionModules(options: BuildExtensionModulesOption
     entryPoints: [entryFile],
     absWorkingDir: path.resolve(projectRoot),
     bundle: true,
-    format: 'cjs',
+    format: target === 'esm' ? 'esm' : 'cjs',
+    external: externals,
     logLevel: 'silent',
     platform: 'node',
     preserveSymlinks: true,
     treeShaking: false,
     write: false,
-    plugins: [extensionEntryPlugin(entryFile, source), extensionBundlePlugin()],
+    plugins: [extensionEntryPlugin(entryFile, source), extensionBundlePlugin(externals)],
   })
   if (build.errors.length > 0) {
     throw new Error(`Failed to build extension modules: ${build.errors.map(error => error.text).join('\n')}`)
@@ -175,6 +183,7 @@ export async function buildExtensionModules(options: BuildExtensionModulesOption
   return {
     entryFile,
     entryRoot,
+    target,
     code,
     watchFiles: [...scannedFiles].sort(),
   }
@@ -235,12 +244,12 @@ function extensionEntryPlugin(entryFile: string, source: string): Plugin {
 }
 
 /**
- * Bundle every local module together while keeping `node_modules` dependencies
- * external with their original specifiers. `coc.nvim` is mapped to the shared
+ * Bundle local modules and package dependencies by default. Configured
+ * externals retain their original specifier. `coc.nvim` is mapped to the shared
  * `__coc_test_coc_exports__` global, so the bundle does not depend on the
  * extension sandbox's require interception.
  */
-function extensionBundlePlugin(): Plugin {
+function extensionBundlePlugin(externals: readonly string[]): Plugin {
   const builtins = builtinModuleSet()
   return {
     name: 'coc-test-extension-bundle',
@@ -251,6 +260,9 @@ function extensionBundlePlugin(): Plugin {
         if (args.path === 'coc.nvim') {
           return { path: VIRTUAL_COC, namespace: RUNTIME_NAMESPACE }
         }
+        if (isExternalSpecifier(args.path, externals)) {
+          return { path: args.path, external: true }
+        }
         if (builtins.has(args.path)) {
           return { path: args.path, external: true }
         }
@@ -259,8 +271,6 @@ function extensionBundlePlugin(): Plugin {
         if (!resolved) return { path: args.path, external: true }
         if (resolved.external || resolved.namespace !== 'file') return forwardResolution(resolved)
 
-        const resolvedId = normalize(stripQuery(resolved.path))
-        if (resolvedId.includes('/node_modules/')) return { path: args.path, external: true }
         return forwardResolution(resolved)
       })
 
@@ -270,6 +280,10 @@ function extensionBundlePlugin(): Plugin {
       }))
     },
   }
+}
+
+function isExternalSpecifier(specifier: string, externals: readonly string[]): boolean {
+  return externals.some(external => specifier === external || specifier.startsWith(`${external}/`))
 }
 
 function scanModuleFiles(root: string): string[] {
@@ -372,6 +386,7 @@ function runtimeModulePlugin(options: BundleOptions): Plugin {
   const projectRoot = normalize(options.projectRoot)
   const projectMain = normalize(options.projectMain)
   const cocEntry = normalize(options.cocEntry)
+  const entryFile = options.entryFile ? normalize(options.entryFile) : undefined
   const entryRoot = options.entryRoot ? normalize(options.entryRoot) : undefined
   const builtins = builtinModuleSet()
 
@@ -392,12 +407,16 @@ function runtimeModulePlugin(options: BundleOptions): Plugin {
 
         const resolvedId = normalize(stripQuery(resolved.path))
         if (entryRoot && isInside(resolvedId, entryRoot)) {
-          // Project modules are served at runtime by the module hooks from the
-          // extension bundle's registry, keeping module identity with the
-          // loaded extension. The specifier carries the path relative to the
-          // project root.
+          if (resolvedId === entryFile) {
+            return { path: VIRTUAL_EXTENSION, namespace: RUNTIME_NAMESPACE }
+          }
+          // Bundle a runtime shim instead of leaving a custom specifier for
+          // CommonJS `require()`. Node.js 22.15/22.16 module hooks do not
+          // intercept a require issued by a CommonJS module loaded through a
+          // hook. The shim reads the extension bundle's registry at runtime,
+          // so it still exposes the exact same module instance.
           const relative = toPosix(path.relative(path.resolve(projectRoot), path.resolve(resolvedId)))
-          return { path: `${MODULE_SPECIFIER_PREFIX}${relative}`, external: true }
+          return { path: `${MODULE_SPECIFIER_PREFIX}${relative}`, namespace: RUNTIME_NAMESPACE }
         }
         if (resolvedId === projectMain) {
           return { path: VIRTUAL_EXTENSION, namespace: RUNTIME_NAMESPACE }
@@ -413,7 +432,9 @@ function runtimeModulePlugin(options: BundleOptions): Plugin {
       build.onLoad({ filter: /.*/, namespace: RUNTIME_NAMESPACE }, args => ({
         contents: args.path === VIRTUAL_COC
           ? runtimeCommonJsModule('__coc_test_coc_exports__', 'coc.nvim')
-          : runtimeCommonJsModule('__coc_test_extension_exports__', 'extension exports'),
+          : args.path === VIRTUAL_EXTENSION
+            ? runtimeCommonJsModule('__coc_test_extension_exports__', 'extension exports')
+            : runtimeProjectModule(projectRoot, args.path),
         loader: 'js',
       }))
     },
@@ -475,6 +496,21 @@ function runtimeCommonJsModule(globalKey: string, label: string): string {
 const value = globalThis[${JSON.stringify(globalKey)}]
 if (value === undefined) {
   throw new Error(${JSON.stringify(`coc-test runtime value is unavailable: ${label}`)})
+}
+module.exports = value
+`
+}
+
+function runtimeProjectModule(projectRoot: string, specifier: string): string {
+  const file = normalize(path.resolve(projectRoot, specifier.slice(MODULE_SPECIFIER_PREFIX.length)))
+  return `
+const registry = globalThis[${JSON.stringify(MODULE_REGISTRY_KEY)}]
+if (registry === undefined) {
+  throw new Error(${JSON.stringify(`coc-test module registry is unavailable for ${file}`)})
+}
+const value = registry[${JSON.stringify(file)}]
+if (value === undefined) {
+  throw new Error(${JSON.stringify(`coc-test module is not part of the extension bundle: ${file}`)})
 }
 module.exports = value
 `

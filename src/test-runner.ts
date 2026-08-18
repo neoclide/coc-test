@@ -77,7 +77,7 @@ function runTestChild(
   return new Promise(resolve => {
     const child = fork(new URL('./test-child.js', import.meta.url), [], {
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-      execArgv: childExecArgv(),
+      execArgv: getChildExecArgv(),
       serialization: 'advanced',
     })
     let settled = false
@@ -181,10 +181,10 @@ function waitForChildExit(child: ChildProcess, timeout: number): Promise<boolean
   })
 }
 
-function childExecArgv(): string[] {
+export function getChildExecArgv(execArgv = process.execArgv): string[] {
   const args: string[] = []
-  for (let index = 0; index < process.execArgv.length; index++) {
-    const arg = process.execArgv[index]
+  for (let index = 0; index < execArgv.length; index++) {
+    const arg = execArgv[index]
     if (arg === '--input-type') {
       index++
       continue
@@ -194,6 +194,10 @@ function childExecArgv(): string[] {
     args.push(arg)
   }
   if (!args.includes('--enable-source-maps')) args.push('--enable-source-maps')
+  if (!args.includes('--experimental-vm-modules')) args.push('--experimental-vm-modules')
+  if (!args.includes('--no-warnings') && !args.includes('--disable-warning=ExperimentalWarning')) {
+    args.push('--disable-warning=ExperimentalWarning')
+  }
   return args
 }
 

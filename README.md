@@ -18,7 +18,7 @@ details with source-mapped stack traces.
 
 ## Requirements
 
-- Node.js 22.14 or newer
+- Node.js 22.15 or newer
 - Vim or Neovim
 - A coc.nvim extension with a valid `main` entry in `package.json`
 
@@ -98,36 +98,36 @@ their source modules can then be imported directly with relative paths.
 
 ## Configuration
 
-Use `coc-test.user-settings` in the extension's `package.json` to provide
-coc.nvim settings for the test environment:
+Configure the runner with a `coc-test` object in the extension's
+`package.json`:
 
 ```json
 {
   "coc-test": {
+    "entryFile": "src/index.ts",
     "user-settings": {
       "suggest.noselect": true
-    }
+    },
+    "externals": ["vscode-languageserver"],
+    "target": "commonjs"
   }
 }
 ```
 
-These settings are written to the isolated coc.nvim configuration before the
-tests start.
+| Property | Default | Description |
+| --- | --- | --- |
+| `user-settings` | `{}` | coc.nvim settings written to the isolated test configuration. |
+| `entryFile` | — | Source entry to bundle and activate instead of the package `main` file. |
+| `externals` | `[]` | esbuild external specifiers to leave out of the `entryFile` bundle. |
+| `target` | `"commonjs"` | Bundle format: `"commonjs"` or `"esm"`. |
 
-### entryFile
+### Source entry and shared modules
 
-To test TypeScript code directly, configure the source entry so `coc-test`
-bundles it at test time:
+Without `entryFile`, coc-test activates the extension's `main` file. With
+`entryFile`, it builds the source in memory and activates that bundle; no
+bundle file or generated package manifest is written to the project.
 
-```json
-{
-  "coc-test": {
-    "entryFile": "src/index.ts"
-  }
-}
-```
-
-Test files import project modules with normal relative paths:
+Tests can import source modules with normal relative paths:
 
 ```ts
 import { getStore } from '../src/index.ts'
@@ -137,6 +137,24 @@ import { store } from '../src/store.ts'
 These imports resolve to the same module instances the plugin itself runs, so
 state is shared between the plugin and the tests instead of loading independent
 copies.
+
+### Dependency bundling
+
+Dependencies imported by `entryFile`, including packages in `node_modules`,
+are bundled by default. Add a package to `externals` when it must be resolved
+at runtime instead. Values are passed to esbuild's `external` option; a package
+name also covers its subpaths.
+
+`coc.nvim` is supplied by the test runtime rather than bundled. Node.js built-in
+modules also remain external.
+
+### Bundle target
+
+`target` chooses both the esbuild output and how coc.nvim loads the in-memory
+source:
+
+- `"commonjs"` is the default and works with Node.js 22.15 or newer.
+- `"esm"` uses coc.nvim's ESM source loader and requires Node.js 24 or newer.
 
 ## Watch mode
 

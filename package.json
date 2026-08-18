@@ -23,7 +23,7 @@
     "test:vim": "npm run build && node test/run.js --vim"
   },
   "engines": {
-    "node": ">=22.14.0"
+    "node": ">=22.15.0"
   },
   "packageManager": "bun@1.3.14",
   "dependencies": {

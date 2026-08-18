@@ -1,6 +1,23 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { getTestConcurrency } from '../lib/test-runner.js'
+import { getChildExecArgv, getTestConcurrency } from '../lib/test-runner.js'
+
+test('enables source maps and VM modules in test children', () => {
+  assert.deepEqual(getChildExecArgv(['--input-type', 'module', '--trace-warnings']), [
+    '--trace-warnings',
+    '--enable-source-maps',
+    '--experimental-vm-modules',
+    '--disable-warning=ExperimentalWarning',
+  ])
+  assert.deepEqual(getChildExecArgv([
+    '--enable-source-maps',
+    '--experimental-vm-modules',
+  ]), [
+    '--enable-source-maps',
+    '--experimental-vm-modules',
+    '--disable-warning=ExperimentalWarning',
+  ])
+})
 
 test('runs one test child at a time in CI', () => {
   assert.equal(getTestConcurrency(2, true, 4), 1)
