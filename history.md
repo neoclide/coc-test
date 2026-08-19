@@ -1,3 +1,7 @@
+## 0.1.8
+
+- improve esbuild requirement (c6e83e2)
+
 ## 0.1.7
 
 - feat: bundle entryFile dependencies by default (53fde22)
