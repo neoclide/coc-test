@@ -11,4 +11,5 @@ test('provides isolated coc.nvim and extension exports', () => {
   assert.notEqual(process.pid, process.ppid)
   assert.equal(extension.getState(), state)
   assert.equal(extension.esmDependencyValue, 3)
+  assert.equal(extension.setupCompleted, true)
 })

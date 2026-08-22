@@ -12,6 +12,7 @@ import {
   removeModuleRegistry,
 } from '../lib/project-modules.js'
 import { findProject } from '../lib/project.js'
+import { runSetup } from '../lib/setup.js'
 
 async function createFixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'coc-test-bundle-'))
@@ -86,6 +87,50 @@ test('findProject rejects a missing coc-test entryFile', async t => {
 
   assert.throws(() => findProject(root), /coc-test entryFile does not exist/)
 })
+
+test('findProject resolves a relative setup module inside the extension', async t => {
+  const root = await createFixture(t)
+  await fs.mkdir(path.join(root, 'scripts'))
+  await fs.writeFile(path.join(root, 'scripts', 'setup.mjs'), '')
+  await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({
+    'coc-test': { setup: 'scripts/setup.mjs' },
+    main: 'src/index.ts',
+  }))
+
+  const project = findProject(root)
+  assert.equal(project.setupFile, path.join(root, 'scripts', 'setup.mjs'))
+})
+
+test('findProject validates setup paths and file types', async t => {
+  const root = await createFixture(t)
+  const packageJson = path.join(root, 'package.json')
+  await fs.writeFile(packageJson, JSON.stringify({ 'coc-test': { setup: '../setup.mjs' } }))
+  assert.throws(() => findProject(root), /coc-test setup must be inside the extension root/)
+
+  await fs.writeFile(packageJson, JSON.stringify({ 'coc-test': { setup: '/tmp/setup.mjs' } }))
+  assert.throws(() => findProject(root), /coc-test setup must be a relative path/)
+
+  await fs.writeFile(path.join(root, 'scripts.txt'), '')
+  await fs.writeFile(packageJson, JSON.stringify({ 'coc-test': { setup: 'scripts.txt' } }))
+  assert.throws(() => findProject(root), /coc-test setup must be a .js, .cjs, or .mjs file/)
+})
+
+for (const extension of ['js', 'cjs', 'mjs']) {
+  test(`runs ${extension} setup modules`, async t => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'coc-test-setup-'))
+    t.after(() => fs.rm(root, { recursive: true, force: true }))
+    const setup = path.join(root, `setup.${extension}`)
+    if (extension === 'js') await fs.writeFile(path.join(root, 'package.json'), '{"type":"module"}\n')
+    const source = extension === 'cjs'
+      ? 'module.exports = globalThis.__coc_test_setup_ran__ = (globalThis.__coc_test_setup_ran__ ?? 0) + 1\n'
+      : 'await Promise.resolve()\nglobalThis.__coc_test_setup_ran__ = (globalThis.__coc_test_setup_ran__ ?? 0) + 1\n'
+    await fs.writeFile(setup, source)
+    delete globalThis.__coc_test_setup_ran__
+    await runSetup(setup)
+    assert.equal(globalThis.__coc_test_setup_ran__, 1)
+    delete globalThis.__coc_test_setup_ran__
+  })
+}
 
 test('buildExtensionModules returns bundle code without writing extension files', async t => {
   const root = await createFixture(t)

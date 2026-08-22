@@ -9,6 +9,7 @@
     "*"
   ],
   "coc-test": {
-    "entryFile": "src/index.ts"
+    "entryFile": "src/index.ts",
+    "setup": "scripts/setup.mjs"
   }
 }

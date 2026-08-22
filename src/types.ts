@@ -15,6 +15,8 @@ export interface CliOptions {
 export interface CocTestConfig {
   'user-settings'?: Record<string, unknown>
   entryFile?: string
+  /** Setup module to run before the extension is loaded. Relative to the extension root. */
+  setup?: string
   /** Dependencies to leave external when bundling `entryFile`; passed to esbuild's `external` option. */
   externals?: string[]
   /** Output module format for the `entryFile` bundle. Defaults to CommonJS. */
@@ -35,6 +37,8 @@ export interface ProjectInfo {
   config: CocTestConfig
   /** Absolute path of the configured `coc-test.entryFile`, when set. */
   entryFile?: string
+  /** Absolute path of the configured `coc-test.setup`, when set. */
+  setupFile?: string
   /** Bundled extension code produced by the parent process, loaded through the coc.nvim `sourceCode` option. */
   extensionCode?: string
 }

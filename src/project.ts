@@ -11,6 +11,7 @@ export function findProject(startDirectory = process.cwd()): ProjectInfo {
       const packageJson = readJson(packageJsonPath)
       const config = resolveConfig(packageJson['coc-test'])
       const entryFile = resolveEntryFile(directory, config.entryFile)
+      const setupFile = resolveSetupFile(directory, config.setup)
       const main = typeof packageJson.main === 'string' ? packageJson.main : 'index.js'
       const mainFile = path.resolve(directory, main)
       if (entryFile) {
@@ -27,6 +28,7 @@ export function findProject(startDirectory = process.cwd()): ProjectInfo {
         mainFile,
         config,
         entryFile,
+        setupFile,
       }
     }
 
@@ -68,6 +70,27 @@ function resolveEntryFile(root: string, value: unknown): string | undefined {
   const resolved = path.isAbsolute(value) ? path.resolve(value) : path.resolve(root, value)
   if (!isInside(resolved, root)) {
     throw new Error(`coc-test entryFile must be inside the extension root: ${resolved}`)
+  }
+  return resolved
+}
+
+function resolveSetupFile(root: string, value: unknown): string | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || !value) {
+    throw new Error('coc-test setup must be a non-empty string.')
+  }
+  if (path.isAbsolute(value)) {
+    throw new Error('coc-test setup must be a relative path inside the extension root.')
+  }
+  const resolved = path.resolve(root, value)
+  if (!isInside(resolved, root)) {
+    throw new Error(`coc-test setup must be inside the extension root: ${resolved}`)
+  }
+  if (!['.js', '.cjs', '.mjs'].includes(path.extname(resolved))) {
+    throw new Error('coc-test setup must be a .js, .cjs, or .mjs file.')
+  }
+  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+    throw new Error(`coc-test setup does not exist: ${resolved}`)
   }
   return resolved
 }

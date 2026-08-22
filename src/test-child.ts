@@ -13,6 +13,7 @@ import {
   removeModuleRegistry,
 } from './project-modules.js'
 import { installRuntimeGlobals } from './runtime-globals.js'
+import { runSetup } from './setup.js'
 import { injectTeardownHook, TEARDOWN_KEY } from './test-code.js'
 import type { CocModule, ProjectInfo } from './types.js'
 import type {
@@ -62,6 +63,7 @@ async function main(data: TestChildData, signal: AbortSignal): Promise<TestResul
     }
     session = await startEditor(data.editor, coc, data.installation.vimrc, data.project)
     if (signal.aborted) throw abortError()
+    await runSetup(data.project.setupFile)
     const extension = await loadTestExtension(coc, data.project)
     restoreGlobals = installRuntimeGlobals({
       cocExports: coc.exports,

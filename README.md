@@ -105,6 +105,7 @@ Configure the runner with a `coc-test` object in the extension's
 {
   "coc-test": {
     "entryFile": "src/index.ts",
+    "setup": "scripts/setup.mjs",
     "user-settings": {
       "suggest.noselect": true
     },
@@ -118,6 +119,7 @@ Configure the runner with a `coc-test` object in the extension's
 | --- | --- | --- |
 | `user-settings` | `{}` | coc.nvim settings written to the isolated test configuration. |
 | `entryFile` | — | Source entry to bundle and activate instead of the package `main` file. |
+| `setup` | — | Relative `.js`, `.cjs`, or `.mjs` module to run before the extension loads. |
 | `externals` | `[]` | esbuild external specifiers to leave out of the `entryFile` bundle. |
 | `target` | `"commonjs"` | Bundle format: `"commonjs"` or `"esm"`. |
 
