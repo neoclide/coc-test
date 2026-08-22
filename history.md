@@ -1,3 +1,7 @@
+## 0.1.10
+
+- feat: add short test name pattern option (ad5c673)
+
 ## 0.1.9
 
 - feat: support `setup` for run script before extension load.
