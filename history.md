@@ -5,6 +5,7 @@
 ## 0.1.9
 
 - feat: support `setup` for run script before extension load.
+- fix: print errors when the final test summary fails.
 
 ## 0.1.8
 

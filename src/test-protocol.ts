@@ -42,3 +42,8 @@ export interface TestResult {
 }
 
 export type TestChildMessage = TestProgress | TestResult
+
+/** A failed aggregate result must never be presented as a passing test file. */
+export function isTestResultPassed(result: Pick<TestResult, 'passed' | 'stats'>): boolean {
+  return result.passed && result.stats.failed === 0
+}

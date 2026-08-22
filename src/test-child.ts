@@ -186,7 +186,10 @@ async function runTestBundle(
     stats.todo = summary.counts.todo
     stats.cancelled = summary.counts.cancelled
     stats.failed = Math.max(0, stats.tests - stats.passed - stats.skipped - stats.todo - stats.cancelled)
-    if (!summary.success && stats.failed === 0) stats.failed = 1
+    if (!summary.success) {
+      failed = true
+      if (stats.failed === 0) stats.failed = 1
+    }
     stats.durationMs = summary.duration_ms
     options.onProgress?.({ state: 'running', stats: { ...stats } })
     void teardownOnce()

@@ -4,12 +4,13 @@ import { finished as streamFinished } from 'node:stream/promises'
 import type { TestBundle } from './bundle.js'
 import { TestReporter } from './test-reporter.js'
 import type { CliOptions, CocInstallation, ProjectInfo } from './types.js'
-import type {
-  TestChildCommand,
-  TestChildData,
-  TestChildMessage,
-  TestProgress,
-  TestResult,
+import {
+  isTestResultPassed,
+  type TestChildCommand,
+  type TestChildData,
+  type TestChildMessage,
+  type TestProgress,
+  type TestResult,
 } from './test-protocol.js'
 
 export interface RunTestsOptions {
@@ -57,7 +58,7 @@ export async function runTests(options: RunTestsOptions): Promise<boolean> {
   }
   reporter.finish(results)
 
-  return results.every(result => result?.passed ?? false)
+  return results.every(result => result !== undefined && isTestResultPassed(result))
 }
 
 export function getTestConcurrency(

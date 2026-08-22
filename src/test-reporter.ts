@@ -1,5 +1,5 @@
 import path from 'node:path'
-import type { TestProgress, TestResult, TestStats } from './test-protocol.js'
+import { isTestResultPassed, type TestProgress, type TestResult, type TestStats } from './test-protocol.js'
 
 type FileState = 'queued' | 'starting' | 'running' | 'passed' | 'failed'
 
@@ -58,7 +58,7 @@ export class TestReporter {
   complete(result: TestResult): void {
     const row = this.rowByFile.get(result.sourceFile)
     if (!row) return
-    row.state = result.passed ? 'passed' : 'failed'
+    row.state = isTestResultPassed(result) ? 'passed' : 'failed'
     row.activeTest = undefined
     row.stats = result.stats
     row.durationMs = Date.now() - (row.startedAt ?? Date.now())
@@ -77,7 +77,7 @@ export class TestReporter {
     if (this.interactive) this.render()
 
     const completed = results.filter((result): result is TestResult => result !== undefined)
-    const failures = completed.filter(result => !result.passed)
+    const failures = completed.filter(result => !isTestResultPassed(result))
     if (failures.length > 0) {
       const failedTests = failures.reduce((count, result) => count + result.stats.failed, 0)
       const failureCount = failedTests || failures.length
