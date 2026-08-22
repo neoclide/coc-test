@@ -1,3 +1,7 @@
+## 0.2.0
+
+- fix: report final test summary failures
+
 ## 0.1.10
 
 - feat: add short test name pattern option (ad5c673)
