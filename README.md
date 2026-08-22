@@ -200,7 +200,7 @@ COC_TEST_COC_PATH=/path/to/coc.nvim npm test
 --nvim                         Run tests on Neovim (default)
 --vim                          Run tests on Vim
 -w, --watch                    Watch files and rerun affected tests
---test-name-pattern <pattern>  Run tests matching a regular expression (must be valid)
+-t, --test-name-pattern <pattern>  Filter tests by name
 --coc-path <directory>         Use an existing coc.nvim build
 -u, --use <version>            Use a specific coc.nvim release tag
 -d, --download                 Force a fresh coc.nvim download

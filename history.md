@@ -1,3 +1,7 @@
+## 0.1.9
+
+- feat: support `setup` for run script before extension load.
+
 ## 0.1.8
 
 - improve esbuild requirement (c6e83e2)

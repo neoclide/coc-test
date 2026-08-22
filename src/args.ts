@@ -11,7 +11,8 @@ Options:
   -d, --download                  Force download coc.nvim repo from github.
   -u, --use <version>             Tag version of coc.nvim (latest by default)
   --coc-path <directory>          Use an existing coc.nvim build without downloading
-  --test-name-pattern <pattern>   Only run tests whose name matches the pattern
+  -t, --test-name-pattern <pattern>
+                                  Only run tests whose name matches the pattern
   --nvim                          Run tests on Neovim (default)
   --vim                           Run tests on Vim
   -w, --watch                     Watch files and rerun affected tests
@@ -95,7 +96,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       cocPath = readValue(argv, ++index, arg)
       continue
     }
-    if (arg === '--test-name-pattern') {
+    if (arg === '-t' || arg === '--test-name-pattern') {
       testNamePattern = readValue(argv, ++index, arg)
       continue
     }

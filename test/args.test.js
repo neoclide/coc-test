@@ -44,6 +44,11 @@ test('rejects an invalid test name pattern', () => {
   )
 })
 
+test('parses short test name pattern option', () => {
+  const parsed = parseArgs(['-t', '^foo$', 'test/*.test.js'])
+  assert.equal(parsed.options.testNamePattern, '^foo$')
+})
+
 test('parses long options with an equals sign', () => {
   const versionParsed = parseArgs(['--use=v0.0.83', '--test-name-pattern=^foo$', 'test/*.test.js'])
   assert.equal(versionParsed.options.cocVersion, 'v0.0.83')
