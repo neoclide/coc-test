@@ -50,11 +50,16 @@ export interface ExtensionLoadOptions {
   extensionRoot?: string
 }
 
+export interface LoadedExtension {
+  _exports: unknown
+  unload(): void | Promise<void>
+}
+
 export interface CocModule {
   exports: unknown
   dispose?: () => void
   attach(options: { proc: ChildProcess } | { reader: NodeJS.ReadableStream; writer: NodeJS.WritableStream }): CocPlugin
-  loadExtension(filename: string, active: boolean, options?: ExtensionLoadOptions): Promise<{ _exports: unknown }>
+  loadExtension(filename: string, active: boolean, options?: ExtensionLoadOptions): Promise<LoadedExtension>
   [key: string]: unknown
 }
 
@@ -73,7 +78,7 @@ export interface EditorSession {
   plugin: CocPlugin
   proc: ChildProcess
   server?: Server
-  close(): Promise<void>
+  close(signal?: AbortSignal): Promise<void>
 }
 
 export interface CocInstallation {

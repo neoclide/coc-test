@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import path from 'node:path'
+import { testWorkerTeardown } from './worker-teardown.js'
 import { fileURLToPath } from 'node:url'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -12,6 +13,7 @@ if (!options.cocPath) {
   process.exitCode = 2
 } else {
   process.exitCode = await runCli(options.cocPath, options.editor)
+  if (process.exitCode === 0) await testWorkerTeardown(options.cocPath, options.editor)
 }
 
 function parseOptions(argv) {
