@@ -78,7 +78,7 @@ export interface EditorSession {
   plugin: CocPlugin
   proc: ChildProcess
   server?: Server
-  close(): Promise<void>
+  close(signal?: AbortSignal): Promise<void>
 }
 
 export interface CocInstallation {

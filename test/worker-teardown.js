@@ -16,7 +16,11 @@ export async function testWorkerTeardown(cocPath, editor) {
     projectMain: project.mainFile,
     cocEntry: installation.entryFile,
   })
-  for (const scenario of ['success', 'failure', 'test-abort', 'activation-abort', 'unload-error', 'activation-abort-unload-error']) {
+  for (const scenario of [
+    'success', 'failure', 'test-abort', 'activation-abort', 'unload-error',
+    'activation-abort-unload-error', 'activation-abort-pending',
+    'unload-abort-pending', 'activation-abort-late', 'quit-abort-pending',
+  ]) {
     await runCase({ installation, project, bundle, editor }, scenario)
     console.log(`Worker teardown (${editor}): ${scenario} passed`)
   }
@@ -34,6 +38,12 @@ function runCase(data, scenario) {
     let result
     let output = ''
     let editorPid
+    let cancellationTimeout
+    const cancel = () => {
+      child.send({ type: 'cancel' })
+      // Match the parent's final cancellation deadline. Reaching it is a failure.
+      cancellationTimeout ??= setTimeout(() => { child.kill('SIGKILL') }, 4000)
+    }
     const timeout = setTimeout(() => {
       // Kill only processes started by this fixture; a timeout is always a failure.
       child.kill('SIGKILL')
@@ -48,34 +58,51 @@ function runCase(data, scenario) {
         phases.push(message)
         editorPid ??= message.editorPid
         if (message.phase === 'activating') {
-          child.send({ type: 'cancel' })
+          cancel()
+          if (!['activation-abort-pending', 'activation-abort-late'].includes(scenario)) {
+            child.send({ type: 'release-activation' })
+          }
+        }
+        if (message.phase === 'editor-closing' && scenario === 'activation-abort-late') {
           child.send({ type: 'release-activation' })
         }
+        if (message.phase === 'unloading' ||
+          (message.phase === 'editor-closing' && scenario === 'quit-abort-pending')) cancel()
         if (message.phase === 'test-started') {
-          child.send({ type: 'cancel' })
+          cancel()
           child.send({ type: 'release-activation' })
         }
       } else if (message.type === 'result') {
         result = message
       }
     })
-    child.once('error', error => { clearTimeout(timeout); reject(error) })
+    child.once('error', error => {
+      clearTimeout(timeout)
+      clearTimeout(cancellationTimeout)
+      reject(error)
+    })
     child.once('exit', (code, signal) => {
       clearTimeout(timeout)
+      clearTimeout(cancellationTimeout)
       try {
         assert.equal(signal, null, output)
         assert.equal(code, 0, output)
         assert.ok(result, `missing result: ${output}`)
         assert.equal(result.passed, scenario === 'success', result.report)
-        assert.deepEqual(phases.filter(p => p.phase === 'disposed').map(p => p.disposals), [1], result.report)
-        assert.equal(phases.filter(p => p.phase === 'worker-exit').length, 1)
+        const createdWorker = scenario !== 'activation-abort-pending'
+        assert.deepEqual(phases.filter(p => p.phase === 'disposed').map(p => p.disposals), createdWorker ? [1] : [], result.report)
+        assert.equal(phases.filter(p => p.phase === 'worker-exit').length, createdWorker ? 1 : 0)
+        assert.equal(phases.filter(p => p.phase === 'editor-closing').length, 1, 'editor closure must be reached')
         assert.ok(editorPid)
         assert.throws(() => process.kill(editorPid, 0), { code: 'ESRCH' }, 'editor must have exited')
         if (scenario === 'failure') assert.match(result.report, /fixture assertion failure/)
         if (scenario.endsWith('unload-error')) assert.match(result.report, /fixture unload rejection/)
-        assert.doesNotMatch(output, /UnhandledPromiseRejection/)
+        assert.doesNotMatch(output, /UnhandledPromiseRejection|UnhandledRejection/)
         resolve()
-      } catch (error) { reject(error) }
+      } catch (error) {
+        if (editorPid) { try { process.kill(editorPid, 'SIGKILL') } catch {} }
+        reject(error)
+      }
     })
     child.send({ type: 'run', data })
   })

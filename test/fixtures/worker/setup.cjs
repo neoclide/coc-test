@@ -25,3 +25,11 @@ if (process.env.COC_TEST_WORKER_CASE.endsWith('unload-error')) {
     if (activated) throw new Error('fixture unload rejection')
   }
 }
+
+const nvim = coc.exports.workspace.nvim
+const quit = nvim.quit.bind(nvim)
+nvim.quit = () => {
+  process.send({ type: 'fixture', phase: 'editor-closing' })
+  if (process.env.COC_TEST_WORKER_CASE === 'quit-abort-pending') return new Promise(() => {})
+  return quit()
+}

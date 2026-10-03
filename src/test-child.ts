@@ -5,6 +5,7 @@ import { run } from 'node:test'
 import { spec } from 'node:test/reporters'
 import { pathToFileURL } from 'node:url'
 import type { TestBundle } from './bundle.js'
+import { waitWithCancellation } from './cancellation.js'
 import { loadCocModule, removeCocTestDirs } from './coc.js'
 import { startEditor } from './editor.js'
 import {
@@ -52,11 +53,13 @@ async function main(data: TestChildData, signal: AbortSignal): Promise<TestResul
       session = undefined
       try {
         // Activation may still be pending when a cancellation starts teardown.
-        // Keep ownership of its eventual handle so a late activation is unloaded.
-        const extension = await extensionPromise?.catch(() => undefined)
-        await extension?.unload()
+        // Keep its eventual handle for best-effort unload even after the wait
+        // times out. Bound activation and unload together on cancellation,
+        // leaving most of the parent's four-second grace period for the editor.
+        const unload = extensionPromise?.then(extension => extension.unload(), () => undefined)
+        if (unload) await waitWithCancellation(unload, signal, 500)
       } finally {
-        await current?.close()
+        await current?.close(signal)
       }
     })
     return closePromise
@@ -78,7 +81,7 @@ async function main(data: TestChildData, signal: AbortSignal): Promise<TestResul
     await runSetup(data.project.setupFile)
     if (signal.aborted) throw abortError()
     extensionPromise = loadTestExtension(coc, data.project)
-    const extension = await extensionPromise
+    const extension = await waitWithCancellation(extensionPromise, signal)
     if (signal.aborted) throw abortError()
     restoreGlobals = installRuntimeGlobals({
       cocExports: coc.exports,

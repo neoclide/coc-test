@@ -17,3 +17,10 @@ exports.activate = async context => {
   worker.once('exit', () => workspace.workerFixture.send({ phase: 'worker-exit' }))
   workspace.workerFixture.send({ phase: 'activated', editorPid })
 }
+
+exports.deactivate = async () => {
+  if (process.env.COC_TEST_WORKER_CASE === 'unload-abort-pending') {
+    workspace.workerFixture.send({ phase: 'unloading' })
+    await new Promise(() => {})
+  }
+}

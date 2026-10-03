@@ -3,6 +3,7 @@ import crypto from 'node:crypto'
 import net, { type Server } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
+import { waitWithCancellation } from './cancellation.js'
 import type { CocModule, EditorSession, ProjectInfo } from './types.js'
 
 export async function startEditor(
@@ -100,8 +101,8 @@ function createSession(plugin: ReturnType<CocModule['attach']>, proc: cp.ChildPr
     plugin,
     proc,
     server,
-    async close() {
-      closePromise ??= closeSession(plugin, proc, server)
+    async close(signal?: AbortSignal) {
+      closePromise ??= closeSession(plugin, proc, server, signal)
       await closePromise
     },
   }
@@ -111,11 +112,16 @@ async function closeSession(
   plugin: ReturnType<CocModule['attach']>,
   proc: cp.ChildProcess,
   server?: Server,
+  signal?: AbortSignal,
 ): Promise<void> {
   plugin.dispose()
   try {
     const quitPromise = plugin.nvim.quit?.()
-    if (quitPromise) await withTimeout(quitPromise, 2_000, 'Timed out waiting for editor quit.')
+    if (quitPromise) {
+      // Cancellation must leave time to terminate an unresponsive editor before
+      // the parent forcibly kills this test child and its fallback timers.
+      await withTimeout(waitWithCancellation(quitPromise, signal), 2_000, 'Timed out waiting for editor quit.')
+    }
   } catch {
     // The editor or its RPC channel may already be closed.
   }
