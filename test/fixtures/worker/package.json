@@ -1,0 +1,8 @@
+{
+  "name": "coc-test-worker-fixture",
+  "version": "1.0.0",
+  "main": "index.js",
+  "engines": { "coc": ">=0.0.1" },
+  "activationEvents": ["*"],
+  "coc-test": { "setup": "setup.cjs" }
+}

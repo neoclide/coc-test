@@ -15,7 +15,7 @@ import {
 import { installRuntimeGlobals } from './runtime-globals.js'
 import { runSetup } from './setup.js'
 import { injectTeardownHook, TEARDOWN_KEY } from './test-code.js'
-import type { CocModule, ProjectInfo } from './types.js'
+import type { CocModule, LoadedExtension, ProjectInfo } from './types.js'
 import type {
   TestChildCommand,
   TestChildData,
@@ -40,17 +40,29 @@ interface RunTestBundleOptions {
 async function main(data: TestChildData, signal: AbortSignal): Promise<TestResult> {
   let session: Awaited<ReturnType<typeof startEditor>> | undefined
   let closePromise: Promise<void> | undefined
+  let extensionPromise: Promise<LoadedExtension> | undefined
+  let result: TestResult
+  let testsFinished = false
   let restoreGlobals: (() => void) | undefined
   const closeSession = (): Promise<void> => {
+    if (closePromise) return closePromise
     if (!session) return Promise.resolve()
     closePromise ??= Promise.resolve().then(async () => {
       const current = session
       session = undefined
-      await current?.close()
+      try {
+        // Activation may still be pending when a cancellation starts teardown.
+        // Keep ownership of its eventual handle so a late activation is unloaded.
+        const extension = await extensionPromise?.catch(() => undefined)
+        await extension?.unload()
+      } finally {
+        await current?.close()
+      }
     })
     return closePromise
   }
-  const onAbort = (): void => { void closeSession() }
+  // main's finally block observes the same promise and reports cleanup errors.
+  const onAbort = (): void => { void closeSession().catch(() => undefined) }
   signal.addEventListener('abort', onAbort, { once: true })
   try {
     sendProgress(data.bundle.sourceFile, 'starting', emptyStats())
@@ -64,14 +76,17 @@ async function main(data: TestChildData, signal: AbortSignal): Promise<TestResul
     session = await startEditor(data.editor, coc, data.installation.vimrc, data.project)
     if (signal.aborted) throw abortError()
     await runSetup(data.project.setupFile)
-    const extension = await loadTestExtension(coc, data.project)
+    if (signal.aborted) throw abortError()
+    extensionPromise = loadTestExtension(coc, data.project)
+    const extension = await extensionPromise
+    if (signal.aborted) throw abortError()
     restoreGlobals = installRuntimeGlobals({
       cocExports: coc.exports,
       extensionExports: extension._exports,
     })
     sendProgress(data.bundle.sourceFile, 'running', emptyStats())
 
-    const result = await runTestBundle({
+    const testResult = await runTestBundle({
       bundle: data.bundle,
       testNamePattern: data.testNamePattern,
       teardown: async () => {
@@ -86,13 +101,15 @@ async function main(data: TestChildData, signal: AbortSignal): Promise<TestResul
       ),
     })
 
-    return {
+    if (signal.aborted) throw abortError()
+    testsFinished = true
+    result = {
       type: 'result',
       sourceFile: data.bundle.sourceFile,
-      ...result,
+      ...testResult,
     }
   } catch (error) {
-    return {
+    result = {
       type: 'result',
       sourceFile: data.bundle.sourceFile,
       passed: false,
@@ -102,19 +119,26 @@ async function main(data: TestChildData, signal: AbortSignal): Promise<TestResul
   } finally {
     try {
       signal.removeEventListener('abort', onAbort)
+      try {
+        await closeSession()
+      } catch (error) {
+        result!.passed = false
+        // runTestBundle already includes teardown failures in its report.
+        if (!testsFinished) result!.report += `coc-test teardown failed: ${errorMessage(error)}\n`
+      }
+    } finally {
       restoreGlobals?.()
       removeModuleRegistry()
-      await closeSession()
-    } finally {
       removeCocTestDirs()
     }
   }
+  return result!
 }
 
 async function loadTestExtension(
   coc: CocModule,
   project: ProjectInfo,
-): Promise<{ _exports: unknown }> {
+): Promise<LoadedExtension> {
   if (!project.entryFile) return coc.loadExtension(project.root, true)
   const sourceCode = project.extensionCode
   if (typeof sourceCode !== 'string') {
