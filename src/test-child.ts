@@ -15,6 +15,7 @@ import {
 } from './project-modules.js'
 import { installRuntimeGlobals } from './runtime-globals.js'
 import { runSetup } from './setup.js'
+import { waitForExtensionUnload } from './teardown.js'
 import { injectTeardownHook, TEARDOWN_KEY } from './test-code.js'
 import type { CocModule, LoadedExtension, ProjectInfo } from './types.js'
 import type {
@@ -54,10 +55,10 @@ async function main(data: TestChildData, signal: AbortSignal): Promise<TestResul
       try {
         // Activation may still be pending when a cancellation starts teardown.
         // Keep its eventual handle for best-effort unload even after the wait
-        // times out. Bound activation and unload together on cancellation,
-        // leaving most of the parent's four-second grace period for the editor.
+        // times out. Normal teardown has a finite deadline; cancellation uses
+        // a shorter grace period to leave time for editor shutdown.
         const unload = extensionPromise?.then(extension => extension.unload(), () => undefined)
-        if (unload) await waitWithCancellation(unload, signal, 500)
+        if (unload) await waitForExtensionUnload(unload, signal)
       } finally {
         await current?.close(signal)
       }

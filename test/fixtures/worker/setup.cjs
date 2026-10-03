@@ -1,11 +1,20 @@
+const fs = require('node:fs')
 const coc = require(process.env.COC_TEST_WORKER_COC_ENTRY)
 let activated = false
+const send = message => {
+  const event = { type: 'fixture', childPid: process.pid, ...message }
+  if (process.env.COC_TEST_WORKER_EVENTS) {
+    fs.appendFileSync(process.env.COC_TEST_WORKER_EVENTS, JSON.stringify(event) + '\n')
+  }
+  if (process.connected) process.send(event)
+}
+process.on('exit', code => send({ phase: 'child-exit', code }))
 // The extension runs in a VM with a restricted process facade. Keep IPC in the
 // host setup module, while the Worker and its subscription belong to the extension.
 coc.exports.workspace.workerFixture = {
   send: message => {
     if (message.phase === 'activated') activated = true
-    process.send({ type: 'fixture', ...message })
+    send(message)
   },
   waitForRelease: () => new Promise(resolve => {
     const release = message => {
@@ -29,7 +38,7 @@ if (process.env.COC_TEST_WORKER_CASE.endsWith('unload-error')) {
 const nvim = coc.exports.workspace.nvim
 const quit = nvim.quit.bind(nvim)
 nvim.quit = () => {
-  process.send({ type: 'fixture', phase: 'editor-closing' })
+  send({ phase: 'editor-closing' })
   if (process.env.COC_TEST_WORKER_CASE === 'quit-abort-pending') return new Promise(() => {})
   return quit()
 }

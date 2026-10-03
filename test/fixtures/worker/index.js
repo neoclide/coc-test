@@ -19,7 +19,7 @@ exports.activate = async context => {
 }
 
 exports.deactivate = async () => {
-  if (process.env.COC_TEST_WORKER_CASE === 'unload-abort-pending') {
+  if (['unload-abort-pending', 'unload-pending'].includes(process.env.COC_TEST_WORKER_CASE)) {
     workspace.workerFixture.send({ phase: 'unloading' })
     await new Promise(() => {})
   }
