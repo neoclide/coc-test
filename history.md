@@ -1,3 +1,10 @@
+## 0.2.1
+
+- Merge pull request #2 from neoclide/codex/fix-extension-teardown-20261003 (c5f0f77)
+- fix: bound ordinary extension unload teardown (691536b)
+- fix: bound cancellation cleanup before editor shutdown (205d189)
+- fix extension teardown (916d5de)
+
 ## 0.2.0
 
 - fix: report final test summary failures
