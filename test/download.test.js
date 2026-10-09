@@ -1,6 +1,51 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import test from 'node:test'
-import { DownloadProgress } from '../lib/download.js'
+import { downloadFile, DownloadProgress, getCocReleaseInfo } from '../lib/download.js'
+
+for (const { name, ghToken, githubToken, token } of [
+  { name: 'omit authorization when tokens are unset' },
+  { name: 'omit authorization when tokens are empty', ghToken: '', githubToken: '' },
+  { name: 'use GITHUB_TOKEN', githubToken: 'test-github-token', token: 'test-github-token' },
+  { name: 'use GH_TOKEN', ghToken: 'test-gh-token', token: 'test-gh-token' },
+  { name: 'prefer GH_TOKEN', ghToken: 'test-gh-token', githubToken: 'test-github-token', token: 'test-gh-token' },
+  { name: 'fall back from empty GH_TOKEN', ghToken: '', githubToken: 'test-github-token', token: 'test-github-token' },
+]) {
+  test(`GitHub requests ${name}`, async t => {
+    for (const [key, value] of [['GH_TOKEN', ghToken], ['GITHUB_TOKEN', githubToken]]) {
+      const originalValue = process.env[key]
+      t.after(() => {
+        if (originalValue === undefined) delete process.env[key]
+        else process.env[key] = originalValue
+      })
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'coc-test-download-'))
+    t.after(() => fs.rm(root, { recursive: true, force: true }))
+    const sha = 'a'.repeat(40)
+    const fetchMock = t.mock.method(globalThis, 'fetch', async (url, options) => {
+      assert.deepEqual(options.headers, {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'coc-test',
+        'X-GitHub-Api-Version': '2022-11-28',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      })
+      return url.endsWith('/git/ref/heads/release')
+        ? Response.json({ object: { type: 'commit', sha } })
+        : new Response('archive')
+    })
+
+    const release = await getCocReleaseInfo()
+    const destination = path.join(root, 'coc.zip')
+    await downloadFile(release.zipUrl, destination)
+    assert.equal(fetchMock.mock.callCount(), 2)
+    assert.equal(await fs.readFile(destination, 'utf8'), 'archive')
+  })
+}
 
 test.before(() => {
   process.env.CI = ''

@@ -8,11 +8,16 @@ import { extractZip } from './unzip.js'
 import type { CocInstallation } from './types.js'
 
 function createGitHubHeaders(): Record<string, string> {
-  return {
+  const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
     'User-Agent': 'coc-test',
     'X-GitHub-Api-Version': '2022-11-28',
   }
+  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || process.env.GITHUB_API_TOKEN
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+  return headers
 }
 
 async function isFile(filepath: string): Promise<boolean> {

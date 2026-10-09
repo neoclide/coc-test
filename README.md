@@ -214,6 +214,9 @@ Run `npx coc-test --help` for the complete command reference.
 
 ## Environment variables
 
+- `GH_TOKEN`, `GITHUB_TOKEN`, or `GITHUB_API_TOKEN` authenticates GitHub API
+  requests when resolving and downloading coc.nvim releases, avoiding the lower
+  anonymous rate limit. The first non-empty value in that order is used.
 - `VIM_COMMAND` overrides the `vim` executable.
 - `NVIM_COMMAND` overrides the `nvim` executable.
 - `COC_TEST_COC_PATH` provides a local coc.nvim directory instead of
