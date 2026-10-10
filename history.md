@@ -1,3 +1,7 @@
+## 0.2.2
+
+- feat(download): support GitHub token environment variables (4c8f664)
+
 ## 0.2.1
 
 - Merge pull request #2 from neoclide/codex/fix-extension-teardown-20261003 (c5f0f77)
